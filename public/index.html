@@ -444,15 +444,17 @@
     const b=document.createElement('div');b.className='message-body assistant-body';
     const dot=document.createElement('span');dot.className='streaming-dot';b.appendChild(dot);
     w.appendChild(l);w.appendChild(b);chatArea.appendChild(w);scrollDown();
-    let full='',aborted=false;
+    let full='',aborted=false,activeReader=null;
+    abortController.signal.addEventListener('abort',()=>{aborted=true;if(activeReader)try{activeReader.cancel();}catch{}});
     try{
-      const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:s.conversation}),signal:abortController.signal});
+      const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:s.conversation})});
+      if(aborted){if(dot.parentNode)dot.remove();w.remove();return;}
       if(!res.ok){let detail;try{const err=await res.json();detail=err.detail||err.error||'Unknown error';}catch{detail=res.statusText||'Request failed';}const errMsg='Error: '+detail;b.innerHTML=fmt(errMsg);s.conversation.push({role:'assistant',content:errMsg});s.rendered.push({role:'assistant',content:errMsg});persist();return;}
-      const reader=res.body.getReader();const dec=new TextDecoder();let buf='';
-      while(true){const{done,value}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop()||'';
+      activeReader=res.body.getReader();const dec=new TextDecoder();let buf='';
+      while(true){const{done,value}=await activeReader.read();if(done||aborted)break;buf+=dec.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop()||'';
         for(const line of lines){if(line.startsWith('data: ')){const p=line.slice(6).trim();if(p==='[DONE]')continue;try{const j=JSON.parse(p);if(j.message?.content){full+=j.message.content;b.innerHTML=fmt(full.replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'').trim());scrollDown();}}catch{}}}}
     }catch(e){
-      if(e.name==='AbortError'){aborted=true;if(!full.trim()){if(dot.parentNode)dot.remove();w.remove();return;}}
+      if(aborted){if(!full.trim()){if(dot.parentNode)dot.remove();w.remove();return;}}
       else{full+='\n\n[Connection interrupted: '+e.message+'. Try sending your message again.]';b.innerHTML=fmt(full.replace(ACT_RE_STRIP,'').trim());scrollDown();}
     }
     if(dot.parentNode)dot.remove();
