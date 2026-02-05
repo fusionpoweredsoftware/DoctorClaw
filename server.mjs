@@ -46,6 +46,131 @@ async function detectModels(ollamaUrl) {
   return [];
 }
 
+/**
+ * Auto-detect where OpenClaw is installed by checking common locations,
+ * running processes, and PATH lookups.
+ */
+function detectOpenclawDir() {
+  // 1. Check common installation directories
+  const candidates = [
+    '/opt/openclaw',
+    '/usr/local/openclaw',
+    '/etc/openclaw',
+    '/opt/OpenClaw',
+  ];
+  for (const dir of candidates) {
+    if (existsSync(dir)) {
+      console.log(`  Auto-detected OpenClaw directory: ${dir}`);
+      return dir;
+    }
+  }
+
+  // 2. Try to find a running openclaw process and derive its location
+  try {
+    const psOutput = execSync("ps aux 2>/dev/null | grep -i openclaw | grep -v grep", {
+      encoding: 'utf-8', timeout: 5000,
+    }).trim();
+    if (psOutput) {
+      const lines = psOutput.split('\n');
+      for (const line of lines) {
+        // Extract the command/path from ps output (last field group)
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 11) {
+          const cmd = parts[10]; // The command path
+          if (cmd.startsWith('/')) {
+            const dir = dirname(cmd);
+            if (existsSync(dir)) {
+              console.log(`  Auto-detected OpenClaw directory from running process: ${dir}`);
+              return dir;
+            }
+          }
+        }
+        // Try to get the working directory from /proc/<pid>/cwd
+        const pid = parts[1];
+        if (pid && /^\d+$/.test(pid)) {
+          try {
+            const cwd = execSync(`readlink /proc/${pid}/cwd 2>/dev/null`, {
+              encoding: 'utf-8', timeout: 3000,
+            }).trim();
+            if (cwd && existsSync(cwd)) {
+              console.log(`  Auto-detected OpenClaw directory from process cwd: ${cwd}`);
+              return cwd;
+            }
+          } catch {}
+        }
+      }
+    }
+  } catch {}
+
+  // 3. Try which/whereis to find openclaw binaries on PATH
+  try {
+    const binPath = execSync('which openclaw-gateway 2>/dev/null || which openclaw 2>/dev/null', {
+      encoding: 'utf-8', timeout: 3000,
+    }).trim();
+    if (binPath) {
+      const dir = dirname(binPath);
+      // If it's in a bin/ dir, go up one level (e.g., /opt/openclaw/bin -> /opt/openclaw)
+      const parent = dir.endsWith('/bin') || dir.endsWith('/sbin') ? dirname(dir) : dir;
+      if (existsSync(parent)) {
+        console.log(`  Auto-detected OpenClaw directory from PATH: ${parent}`);
+        return parent;
+      }
+    }
+  } catch {}
+
+  // 4. Check if openclaw files exist under home directories
+  try {
+    const homeHits = execSync("find /home -maxdepth 3 -name 'openclaw*' -type d 2>/dev/null | head -1", {
+      encoding: 'utf-8', timeout: 5000,
+    }).trim();
+    if (homeHits && existsSync(homeHits)) {
+      console.log(`  Auto-detected OpenClaw directory under /home: ${homeHits}`);
+      return homeHits;
+    }
+  } catch {}
+
+  // 5. Fallback to default
+  return DEFAULTS.openclaw_dir;
+}
+
+/**
+ * Validate that the OpenClaw directory exists and contains expected files.
+ * Returns an object with validation details.
+ */
+function validateOpenclawDir(dir) {
+  const result = { exists: false, hasConfig: false, hasLogs: false, configPath: null, logPaths: [] };
+  if (!existsSync(dir)) return result;
+  result.exists = true;
+
+  // Look for common config file patterns within the directory
+  const configCandidates = [
+    'config.yml', 'config.yaml', 'config.json', 'config.toml',
+    'openclaw.yml', 'openclaw.yaml', 'openclaw.conf', 'openclaw.json',
+    'gateway.yml', 'gateway.yaml', 'gateway.conf', 'gateway.json',
+    'etc/config.yml', 'etc/openclaw.yml', 'conf/openclaw.yml',
+  ];
+  for (const c of configCandidates) {
+    const full = join(dir, c);
+    if (existsSync(full)) {
+      result.hasConfig = true;
+      result.configPath = full;
+      break;
+    }
+  }
+
+  // Look for log directories/files
+  const logCandidates = ['logs', 'log', 'var/log', 'var/logs'];
+  for (const l of logCandidates) {
+    const full = join(dir, l);
+    if (existsSync(full)) {
+      result.hasLogs = true;
+      result.logPaths.push(full);
+    }
+  }
+
+  return result;
+}
+
 async function runSetup() {
   const configExists = existsSync(CONFIG_PATH);
 
@@ -54,10 +179,32 @@ async function runSetup() {
     if (configExists) {
       const existing = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
       console.log('  Skipping setup (-y flag), using existing config.');
+      // Validate the configured OpenClaw directory
+      const v = validateOpenclawDir(existing.openclaw_dir || DEFAULTS.openclaw_dir);
+      if (!v.exists) {
+        console.log(`  ⚠  Warning: OpenClaw directory "${existing.openclaw_dir || DEFAULTS.openclaw_dir}" does not exist.`);
+        console.log('  Attempting auto-detection...');
+        const detected = detectOpenclawDir();
+        if (detected !== DEFAULTS.openclaw_dir || existsSync(detected)) {
+          console.log(`  → Using detected directory: ${detected}`);
+          existing.openclaw_dir = detected;
+          // Update paths to include the detected directory
+          if (existing.read_paths && !existing.read_paths.includes(detected)) existing.read_paths.push(detected);
+          if (existing.write_paths && !existing.write_paths.includes(detected)) existing.write_paths.push(detected);
+          writeFileSync(CONFIG_PATH, JSON.stringify(existing, null, 2) + '\n', 'utf-8');
+        } else {
+          console.log('  → Could not detect OpenClaw installation. Run with -i to configure manually.');
+        }
+      }
       return existing;
     }
-    console.log('  Skipping setup (-y flag), using defaults.');
-    const cfg = { ...DEFAULTS, read_paths: [...DEFAULTS.read_paths, DEFAULTS.openclaw_dir], write_paths: [...DEFAULTS.write_paths, process.cwd(), DEFAULTS.openclaw_dir] };
+    console.log('  Skipping setup (-y flag), detecting OpenClaw location...');
+    const detectedDir = detectOpenclawDir();
+    const cfg = { ...DEFAULTS, openclaw_dir: detectedDir, read_paths: [...DEFAULTS.read_paths, detectedDir], write_paths: [...DEFAULTS.write_paths, process.cwd(), detectedDir] };
+    const v = validateOpenclawDir(detectedDir);
+    if (!v.exists) {
+      console.log(`  ⚠  Warning: OpenClaw directory "${detectedDir}" does not exist. Run with -i to configure manually.`);
+    }
     writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2) + '\n', 'utf-8');
     return cfg;
   }
@@ -65,6 +212,22 @@ async function runSetup() {
   if (!FLAG_INTERACTIVE && configExists) {
     const existing = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
     console.log(`  Loaded config from ${CONFIG_PATH}`);
+    // Validate the configured OpenClaw directory
+    const v = validateOpenclawDir(existing.openclaw_dir || DEFAULTS.openclaw_dir);
+    if (!v.exists) {
+      console.log(`  ⚠  Warning: OpenClaw directory "${existing.openclaw_dir || DEFAULTS.openclaw_dir}" does not exist.`);
+      console.log('  Attempting auto-detection...');
+      const detected = detectOpenclawDir();
+      if (detected !== DEFAULTS.openclaw_dir || existsSync(detected)) {
+        console.log(`  → Using detected directory: ${detected}`);
+        existing.openclaw_dir = detected;
+        if (existing.read_paths && !existing.read_paths.includes(detected)) existing.read_paths.push(detected);
+        if (existing.write_paths && !existing.write_paths.includes(detected)) existing.write_paths.push(detected);
+        writeFileSync(CONFIG_PATH, JSON.stringify(existing, null, 2) + '\n', 'utf-8');
+      } else {
+        console.log('  → Could not detect OpenClaw installation. Run with -i to configure manually.');
+      }
+    }
     return existing;
   }
 
@@ -102,8 +265,23 @@ async function runSetup() {
   console.log('');
   const os = await ask(rl, 'Operating system (linux/macos/windows)', DEFAULTS.os);
 
-  // OpenClaw directory
-  const openclawDir = await ask(rl, 'OpenClaw directory', DEFAULTS.openclaw_dir);
+  // OpenClaw directory — try auto-detection first
+  console.log('');
+  console.log('  Detecting OpenClaw installation...');
+  const detectedOcDir = detectOpenclawDir();
+  const detectedValid = validateOpenclawDir(detectedOcDir);
+  if (detectedValid.exists) {
+    console.log(`  Found OpenClaw at: ${detectedOcDir}`);
+    if (detectedValid.configPath) console.log(`  Config file: ${detectedValid.configPath}`);
+    if (detectedValid.logPaths.length) console.log(`  Logs: ${detectedValid.logPaths.join(', ')}`);
+  } else {
+    console.log(`  Could not auto-detect OpenClaw installation.`);
+  }
+  const openclawDir = await ask(rl, 'OpenClaw directory', detectedOcDir);
+  const finalValid = openclawDir !== detectedOcDir ? validateOpenclawDir(openclawDir) : detectedValid;
+  if (!finalValid.exists) {
+    console.log(`  ⚠  Warning: "${openclawDir}" does not exist. You can update this later in Settings.`);
+  }
 
   // Paths
   console.log('');
@@ -152,6 +330,7 @@ const MODEL = process.env.DOCTORCLAW_MODEL || config.model || 'glm-4.7:cloud';
 const OPENCLAW_DIR = config.openclaw_dir || '/opt/openclaw';
 const OS_TYPE = config.os || 'linux';
 const BACKUP_DIR = join(__dirname, '.doctorclaw-backups');
+const OPENCLAW_VALIDATION = validateOpenclawDir(OPENCLAW_DIR);
 
 // ── Safety ──────────────────────────────────────────────────────────────────
 
@@ -308,17 +487,75 @@ app.get('/api/health', async (_req, res) => {
 // ── Chat (streaming) ────────────────────────────────────────────────────────
 
 function buildSystemPrompt() {
+  // Build OpenClaw-specific context based on what we detected
+  let openclawContext = `- OpenClaw directory: ${OPENCLAW_DIR}`;
+  if (!OPENCLAW_VALIDATION.exists) {
+    openclawContext += ` (WARNING: this directory does NOT exist — it may be misconfigured)`;
+  }
+  if (OPENCLAW_VALIDATION.configPath) {
+    openclawContext += `\n- OpenClaw config file found at: ${OPENCLAW_VALIDATION.configPath}`;
+  }
+  if (OPENCLAW_VALIDATION.logPaths.length) {
+    openclawContext += `\n- OpenClaw log directories found: ${OPENCLAW_VALIDATION.logPaths.join(', ')}`;
+  }
+
   return `You are DoctorClaw, an expert system diagnostics and troubleshooting assistant. Your job is to help the user fix problems on their system — especially issues related to OpenClaw configuration and services, but also general Linux system issues.
 
 ENVIRONMENT:
 - Operating system: ${OS_TYPE}
-- OpenClaw directory: ${OPENCLAW_DIR}
+${openclawContext}
 - Server working directory: ${process.cwd()}
 - Config file location: ${CONFIG_PATH}
 - Readable paths: ${SAFE_READ_PATHS.join(', ')}
 - Writable paths: ${SAFE_WRITE_PATHS.join(', ')}
 - The user can add more paths by editing doctorclaw.config.json (read_paths and write_paths arrays).
 - IMPORTANT: There is a Settings panel in the DoctorClaw UI — the user can click the gear icon (⚙) in the top-right header to open it. The Settings panel lets the user configure: Ollama URL, model, port, OpenClaw directory, and all readable/writable paths. All changes are saved to doctorclaw.config.json automatically. Path changes take effect immediately without a restart. If a user asks how to configure paths or settings, ALWAYS direct them to the Settings panel (gear icon) first — do NOT tell them to manually edit the JSON file.
+
+OPENCLAW TROUBLESHOOTING GUIDE:
+When diagnosing OpenClaw issues, follow these steps in order. Do NOT guess paths — discover them.
+
+1. FIND OPENCLAW PROCESSES:
+   - Run: ps aux | grep -i openclaw | grep -v grep
+   - Common process names: openclaw-gateway, openclaw-api, openclaw-worker, openclaw-scheduler, openclaw
+   - Note the PID(s) and the full command path — the command path tells you where OpenClaw is installed
+
+2. FIND THE ACTUAL INSTALLATION DIRECTORY:
+   - If the configured directory (${OPENCLAW_DIR}) does not exist, use the process command path from step 1
+   - Run: readlink /proc/<PID>/cwd — this shows the working directory of a running process
+   - Run: readlink /proc/<PID>/exe — this shows the actual binary location
+   - Run: which openclaw-gateway — checks if it's on the PATH
+   - Check: /opt/openclaw, /usr/local/openclaw, /etc/openclaw, or under /home/
+
+3. FIND CONFIGURATION FILES:
+   - Check inside the OpenClaw directory for: config.yml, config.yaml, config.json, config.toml, openclaw.yml, openclaw.conf, gateway.yml, gateway.conf
+   - Also check subdirectories: etc/, conf/, config/
+   - Also check system-wide: /etc/openclaw/, /etc/openclaw.yml
+   - The config file usually specifies the listening port, log locations, database connections, and other service settings
+
+4. FIND LOG FILES:
+   - Check inside the OpenClaw directory for: logs/, log/, var/log/, var/logs/
+   - Check system logs: /var/log/openclaw/, /var/log/syslog, /var/log/messages
+   - Run: journalctl -u openclaw --no-pager -n 50 — if openclaw runs as a systemd service
+   - Run: journalctl -u openclaw-gateway --no-pager -n 50
+
+5. CHECK PORT BINDING:
+   - Run: ss -tlnp | grep <PID> — shows what ports a specific process is listening on
+   - Run: ss -tlnp | grep -E '18789|8080|8443|3000' — check common OpenClaw ports
+   - If a process is running but NOT listening on any port, it may be stuck during startup or failing to bind
+   - Read the config file (step 3) to find the EXPECTED port, then check if it's actually bound
+
+6. CHECK SERVICE STATUS:
+   - Run: systemctl status openclaw — if running as a systemd service
+   - Run: systemctl status openclaw-gateway
+   - Check if the service is enabled: systemctl is-enabled openclaw
+
+7. COMMON ISSUES AND FIXES:
+   - "Connection refused" on dashboard port: Process may not be running, may be starting up, or may be bound to a different port/interface. Check the config for the listen address (127.0.0.1 vs 0.0.0.0).
+   - Process running but no ports open: Check logs for startup errors, permission issues, or port conflicts (another process using the same port).
+   - OpenClaw directory not found: The installation may be in a non-standard location. Use process detection (step 1-2) to find it.
+   - Configuration changes not taking effect: The service may need to be restarted after config changes.
+
+IMPORTANT: If the configured OpenClaw directory does not exist, ALWAYS start by finding running openclaw processes to discover the actual installation location. Do not assume paths exist — verify them first.
 
 RULES:
 1. You can REQUEST actions (reading files, running commands, writing files) but you CANNOT execute them yourself. The user must approve each action.
@@ -331,16 +568,16 @@ RULES:
 3. ALWAYS use absolute paths (starting with / on linux/mac, or drive letter on windows). Never use relative paths.
 4. RUN_SCRIPT can execute .sh, .bash, .bat, .cmd, and .ps1 scripts from any readable directory. The correct shell is chosen automatically based on the file extension and configured OS. Use RUN_SCRIPT instead of RUN_CMD when executing existing scripts.
 5. Use commands and paths appropriate for the configured operating system (${OS_TYPE}). For example, use ls on linux/mac and dir on windows.
-4. Only request ONE action at a time. Wait for the result before requesting the next.
-5. NEVER suggest actions that could damage the system — no destructive commands, no formatting disks, no deleting critical system files.
-6. Always explain WHY you want to perform each action before requesting it.
-7. When proposing a fix that writes to a file, show the user what you plan to write and explain the change.
-8. Be concise, professional, and helpful. You are a doctor for systems — diagnose methodically.
-9. If you are unsure, ask clarifying questions before taking action.
-10. When you have enough information, provide a clear diagnosis and treatment plan.
-11. If an action FAILS or is DENIED, explain to the user what went wrong in plain language, suggest an alternative approach, and continue troubleshooting. Do NOT stop or get stuck — always keep the conversation moving forward.
-12. If a path is denied due to access restrictions, tell the user which paths are currently writable, and let them know they can add more paths by clicking the gear icon (⚙) in the top-right corner to open Settings.
-13. Only write to paths listed in the writable paths above. If you need to write somewhere else, tell the user to add it to the config first.`;
+6. Only request ONE action at a time. Wait for the result before requesting the next.
+7. NEVER suggest actions that could damage the system — no destructive commands, no formatting disks, no deleting critical system files.
+8. Always explain WHY you want to perform each action before requesting it.
+9. When proposing a fix that writes to a file, show the user what you plan to write and explain the change.
+10. Be concise, professional, and helpful. You are a doctor for systems — diagnose methodically.
+11. If you are unsure, ask clarifying questions before taking action.
+12. When you have enough information, provide a clear diagnosis and treatment plan.
+13. If an action FAILS or is DENIED, explain to the user what went wrong in plain language, suggest an alternative approach, and continue troubleshooting. Do NOT stop or get stuck — always keep the conversation moving forward.
+14. If a path is denied due to access restrictions, tell the user which paths are currently writable, and let them know they can add more paths by clicking the gear icon (⚙) in the top-right corner to open Settings.
+15. Only write to paths listed in the writable paths above. If you need to write somewhere else, tell the user to add it to the config first.`;
 }
 
 app.post('/api/chat', async (req, res) => {
@@ -374,27 +611,50 @@ app.post('/api/chat', async (req, res) => {
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let streamStarted = false;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const parsed = JSON.parse(line);
-          res.write(`data: ${JSON.stringify(parsed)}\n\n`);
-          if (parsed.done) {
-            res.write('data: [DONE]\n\n');
-          }
-        } catch { /* skip malformed */ }
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        streamStarted = true;
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const parsed = JSON.parse(line);
+            res.write(`data: ${JSON.stringify(parsed)}\n\n`);
+            if (parsed.done) {
+              res.write('data: [DONE]\n\n');
+            }
+          } catch { /* skip malformed */ }
+        }
       }
+    } catch (streamErr) {
+      // Stream was interrupted mid-response — send error as an SSE event
+      // so the frontend can display it gracefully instead of crashing
+      const errMsg = streamErr.message || 'Connection to Ollama lost';
+      console.error(`  Stream error: ${errMsg}`);
+      try {
+        res.write(`data: ${JSON.stringify({ message: { content: `\n\n[Stream interrupted: ${errMsg}. The Ollama connection was lost mid-response. Try sending your message again.]` }, done: true })}\n\n`);
+        res.write('data: [DONE]\n\n');
+      } catch { /* response may already be closed */ }
     }
     res.end();
   } catch (err) {
-    res.status(500).json({ error: 'Server error', detail: err.message });
+    // If headers haven't been sent yet, we can return a proper JSON error
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Server error', detail: err.message });
+    } else {
+      // Headers already sent (streaming started), send error as SSE
+      try {
+        res.write(`data: ${JSON.stringify({ message: { content: `\n\n[Error: ${err.message}]` }, done: true })}\n\n`);
+        res.write('data: [DONE]\n\n');
+      } catch { /* response may already be closed */ }
+      res.end();
+    }
   }
 });
 
