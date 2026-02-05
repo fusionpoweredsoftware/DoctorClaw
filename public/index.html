@@ -131,6 +131,32 @@
   .btn-save { font-family: var(--font-body); font-size: 13px; font-weight: 500; padding: 10px 24px; background: var(--accent); color: var(--accent-text); border: none; border-radius: var(--radius-sm); cursor: pointer; transition: all var(--transition); white-space: nowrap; }
   .btn-save:hover { background: var(--accent-hover); }
 
+  /* ── Stop button ── */
+  .btn-send.stopping { background: var(--danger); }
+  .btn-send.stopping:hover { background: var(--danger-hover); }
+
+  /* ── Edit message ── */
+  .message-user-wrap { position: relative; }
+  .message-edit-btn {
+    position: absolute; right: 8px; top: 28px; width: 28px; height: 28px;
+    border: 1px solid var(--border); background: var(--bg-surface); border-radius: var(--radius-sm);
+    display: none; align-items: center; justify-content: center;
+    cursor: pointer; color: var(--text-tertiary); transition: all var(--transition); z-index: 2;
+  }
+  .message-user-wrap:hover .message-edit-btn { display: flex; }
+  .message-edit-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-subtle); }
+  .message-edit-btn svg { width: 14px; height: 14px; }
+  .edit-container { margin-top: 8px; }
+  .edit-textarea {
+    width: 100%; font-family: var(--font-body); font-size: 14.5px; padding: 12px 16px;
+    background: var(--bg-surface); border: 2px solid var(--accent); border-radius: var(--radius);
+    color: var(--text-primary); resize: vertical; min-height: 60px; max-height: 200px;
+    line-height: 1.5; outline: none; transition: border var(--transition);
+  }
+  .edit-actions { display: flex; gap: 8px; margin-top: 8px; justify-content: flex-end; }
+  .edit-actions .btn { padding: 6px 16px; font-size: 12.5px; }
+  .branch-notice { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; font-style: italic; }
+
   @media (max-width: 640px) {
     .header { padding: 12px 16px; } .tabs-bar { padding: 8px 16px 0; } .chat-area { padding: 16px; } .input-area { padding: 12px 16px 20px; }
     .brand-text span { display: none; } .tab { max-width: 130px; padding: 7px 10px; }
@@ -234,7 +260,9 @@
   function saveS(s){localStorage.setItem(SK,JSON.stringify(s));}
   function gAI(){return localStorage.getItem(AK);}
   function sAI(id){localStorage.setItem(AK,id);}
-  let sessions=loadS(),activeId=gAI(),streaming=false;
+  let sessions=loadS(),activeId=gAI(),streaming=false,abortController=null;
+  const SEND_ICON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
+  const STOP_ICON='<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
   if(!sessions.length){const s=mkS();sessions.push(s);activeId=s.id;persist();}
   else if(!sessions.find(s=>s.id===activeId)){activeId=sessions[0].id;persist();}
   function mkS(){const n=new Date();return{id:'s_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),label:n.toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}),conversation:[],rendered:[],createdAt:n.toISOString()};}
@@ -343,12 +371,20 @@
   function renderChat(){
     chatArea.innerHTML='';const s=cur();
     if(!s||!s.rendered.length){chatArea.innerHTML='<div class="welcome"><div class="welcome-icon">🩺</div><h2>What\'s the problem?</h2><p>Describe the issue you\'re experiencing. I\'ll diagnose it step by step, asking for permission before reading files, running commands, or making changes.</p></div>';return;}
-    s.rendered.forEach(e=>{
+    s.rendered.forEach((e,idx)=>{
       const w=document.createElement('div');w.className='message no-anim';
+      if(e.role==='user')w.classList.add('message-user-wrap');
       const l=document.createElement('div');l.className='message-label'+(e.role==='assistant'?' assistant-label':'');l.textContent=e.role==='user'?'You':'DoctorClaw';
       const b=document.createElement('div');b.className='message-body '+e.role+'-body';
       b.innerHTML=fmt((e.content||'').replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'').trim());
-      w.appendChild(l);w.appendChild(b);chatArea.appendChild(w);
+      w.appendChild(l);w.appendChild(b);
+      if(e.role==='user'&&!streaming){
+        const eb=document.createElement('button');eb.className='message-edit-btn';eb.title='Edit message';
+        eb.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+        eb.addEventListener('click',()=>startEdit(idx,e.content,w,b));
+        w.appendChild(eb);
+      }
+      chatArea.appendChild(w);
       if(e.actions)e.actions.forEach(a=>restoreAct(a,w));
     });scrollDown();
   }
@@ -377,7 +413,7 @@
         const data=await res.json();act.status='approved';act.result=data.result;act.resultSuccess=data.success;persist();
         const r=document.createElement('div');r.className='action-result '+(data.success?'success':'failure');r.textContent=data.result;rc.appendChild(r);ab.textContent='✓ Approved';
         cur().conversation.push({role:'user',content:'[Result of '+act.type+' on "'+act.target+'"]: '+(data.success?'SUCCESS':'FAILED')+'\n'+data.result});persist();
-        streaming=true;sendBtn.disabled=true;await streamResp();streaming=false;sendBtn.disabled=false;
+        streaming=true;setSendBtnStreaming(true);await streamResp();streaming=false;setSendBtnStreaming(false);
       }catch(err){const r=document.createElement('div');r.className='action-result failure';r.textContent='Error: '+err.message;rc.appendChild(r);ab.textContent='✓ Approve';ab.disabled=false;db.disabled=false;}
       scrollDown();
     });
@@ -397,48 +433,102 @@
 
   input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,160)+'px';});
   input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();}});
-  sendBtn.addEventListener('click',sendMsg);
+  sendBtn.addEventListener('click',()=>{if(streaming){if(abortController)abortController.abort();}else{sendMsg();}});
 
   async function sendMsg(){
     const text=input.value.trim();if(!text||streaming)return;const s=cur();
     if(!s.conversation.length){s.label=text.length>30?text.slice(0,30)+'…':text;renderTabs();}
     s.conversation.push({role:'user',content:text});s.rendered.push({role:'user',content:text});persist();
     input.value='';input.style.height='auto';renderChat();
-    streaming=true;sendBtn.disabled=true;await streamResp();streaming=false;sendBtn.disabled=false;input.focus();
+    streaming=true;setSendBtnStreaming(true);await streamResp();streaming=false;setSendBtnStreaming(false);input.focus();
   }
 
   async function streamResp(){
-    const s=cur();const w=document.createElement('div');w.className='message';
+    const s=cur();abortController=new AbortController();
+    const w=document.createElement('div');w.className='message';
     const l=document.createElement('div');l.className='message-label assistant-label';l.textContent='DoctorClaw';
     const b=document.createElement('div');b.className='message-body assistant-body';
     const dot=document.createElement('span');dot.className='streaming-dot';b.appendChild(dot);
     w.appendChild(l);w.appendChild(b);chatArea.appendChild(w);scrollDown();
-    let full='';
+    let full='',aborted=false;
     try{
-      const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:s.conversation})});
+      const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:s.conversation}),signal:abortController.signal});
       if(!res.ok){const err=await res.json();b.innerHTML=fmt('Error: '+(err.detail||err.error));s.rendered.push({role:'assistant',content:'Error: '+(err.detail||err.error)});persist();return;}
       const reader=res.body.getReader();const dec=new TextDecoder();let buf='';
       while(true){const{done,value}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop()||'';
         for(const line of lines){if(line.startsWith('data: ')){const p=line.slice(6).trim();if(p==='[DONE]')continue;try{const j=JSON.parse(p);if(j.message?.content){full+=j.message.content;b.innerHTML=fmt(full.replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'').trim());scrollDown();}}catch{}}}}
-    }catch(e){full+='\n\n[Connection interrupted: '+e.message+'. Try sending your message again.]';b.innerHTML=fmt(full.replace(ACT_RE_STRIP,'').trim());scrollDown();}
+    }catch(e){
+      if(e.name==='AbortError'){aborted=true;if(!full.trim()){if(dot.parentNode)dot.remove();w.remove();return;}}
+      else{full+='\n\n[Connection interrupted: '+e.message+'. Try sending your message again.]';b.innerHTML=fmt(full.replace(ACT_RE_STRIP,'').trim());scrollDown();}
+    }
     if(dot.parentNode)dot.remove();
     b.innerHTML=fmt(full.replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'').trim());
     s.conversation.push({role:'assistant',content:full});
     const entry={role:'assistant',content:full,actions:[]};
-    const RE=/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]+)\]/g;let m;
-    while((m=RE.exec(full))!==null){
-      const type=m[1];let target,content;
-      if(type==='WRITE_FILE'||type==='RUN_SCRIPT'){const ci=m[2].indexOf(':');if(ci>-1){target=m[2].slice(0,ci);content=m[2].slice(ci+1);}else{target=m[2];content=null;}}else{target=m[2];content=null;}
-      const act={type,target,content,status:'pending',result:null,resultSuccess:null};entry.actions.push(act);
-      const card=document.createElement('div');card.className='action-card';
-      const bc=actBadge(type);
-      const tl=actLabel(type);
-      let ch='<div class="action-header"><span class="action-type-badge '+bc+'">'+tl+'</span><span class="action-target" title="'+esc(target)+'">'+esc(target)+'</span></div><div class="action-body">';
-      if(content)ch+='<div class="action-content-preview">'+esc(content)+'</div>';
-      ch+='<div class="action-buttons"><button class="btn btn-approve" data-action="approve">✓ Approve</button><button class="btn btn-deny" data-action="deny">✕ Deny</button></div><div class="action-result-container"></div></div>';
-      card.innerHTML=ch;w.after(card);wireAct(card,act);
+    if(!aborted){
+      const RE=/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]+)\]/g;let m;
+      while((m=RE.exec(full))!==null){
+        const type=m[1];let target,content;
+        if(type==='WRITE_FILE'||type==='RUN_SCRIPT'){const ci=m[2].indexOf(':');if(ci>-1){target=m[2].slice(0,ci);content=m[2].slice(ci+1);}else{target=m[2];content=null;}}else{target=m[2];content=null;}
+        const act={type,target,content,status:'pending',result:null,resultSuccess:null};entry.actions.push(act);
+        const card=document.createElement('div');card.className='action-card';
+        const bc=actBadge(type);
+        const tl=actLabel(type);
+        let ch='<div class="action-header"><span class="action-type-badge '+bc+'">'+tl+'</span><span class="action-target" title="'+esc(target)+'">'+esc(target)+'</span></div><div class="action-body">';
+        if(content)ch+='<div class="action-content-preview">'+esc(content)+'</div>';
+        ch+='<div class="action-buttons"><button class="btn btn-approve" data-action="approve">✓ Approve</button><button class="btn btn-deny" data-action="deny">✕ Deny</button></div><div class="action-result-container"></div></div>';
+        card.innerHTML=ch;w.after(card);wireAct(card,act);
+      }
     }
     s.rendered.push(entry);persist();scrollDown();
+  }
+
+  function setSendBtnStreaming(on){
+    if(on){sendBtn.innerHTML=STOP_ICON;sendBtn.classList.add('stopping');sendBtn.disabled=false;sendBtn.title='Stop';}
+    else{sendBtn.innerHTML=SEND_ICON;sendBtn.classList.remove('stopping');sendBtn.disabled=false;sendBtn.title='Send';}
+  }
+
+  function startEdit(renderedIdx,originalContent,msgWrap,bodyEl){
+    if(streaming)return;
+    if(msgWrap.querySelector('.edit-container'))return;
+    bodyEl.style.display='none';
+    const ec=document.createElement('div');ec.className='edit-container';
+    const ta=document.createElement('textarea');ta.className='edit-textarea';ta.value=originalContent;
+    ta.rows=Math.min(Math.max(originalContent.split('\n').length,2),8);
+    const acts=document.createElement('div');acts.className='edit-actions';
+    const notice=document.createElement('div');notice.className='branch-notice';notice.textContent='Editing will branch the conversation from this point';
+    const cancelB=document.createElement('button');cancelB.className='btn btn-deny';cancelB.textContent='Cancel';
+    const saveB=document.createElement('button');saveB.className='btn btn-approve';saveB.textContent='Save & Submit';
+    acts.appendChild(cancelB);acts.appendChild(saveB);
+    ec.appendChild(ta);ec.appendChild(notice);ec.appendChild(acts);msgWrap.appendChild(ec);ta.focus();
+    const editBtnEl=msgWrap.querySelector('.message-edit-btn');if(editBtnEl)editBtnEl.style.display='none';
+    cancelB.addEventListener('click',()=>{ec.remove();bodyEl.style.display='';if(editBtnEl)editBtnEl.style.display='';});
+    saveB.addEventListener('click',()=>{const t=ta.value.trim();if(t)submitEdit(renderedIdx,t);});
+    ta.addEventListener('keydown',e=>{
+      if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();const t=ta.value.trim();if(t)submitEdit(renderedIdx,t);}
+      if(e.key==='Escape'){ec.remove();bodyEl.style.display='';if(editBtnEl)editBtnEl.style.display='';}
+    });
+  }
+
+  function getConvIdx(s,renderedIdx){
+    let ri=0;
+    for(let ci=0;ci<s.conversation.length;ci++){
+      if(ri>=s.rendered.length)break;
+      if(s.conversation[ci].role===s.rendered[ri].role&&s.conversation[ci].content===s.rendered[ri].content){if(ri===renderedIdx)return ci;ri++;}
+    }
+    return -1;
+  }
+
+  async function submitEdit(renderedIdx,newText){
+    if(streaming)return;const s=cur();
+    const convIdx=getConvIdx(s,renderedIdx);if(convIdx===-1)return;
+    s.conversation=s.conversation.slice(0,convIdx);
+    s.rendered=s.rendered.slice(0,renderedIdx);
+    s.conversation.push({role:'user',content:newText});
+    s.rendered.push({role:'user',content:newText});
+    if(renderedIdx===0){s.label=newText.length>30?newText.slice(0,30)+'…':newText;renderTabs();}
+    persist();renderChat();
+    streaming=true;setSendBtnStreaming(true);await streamResp();streaming=false;setSendBtnStreaming(false);input.focus();
   }
 
   renderTabs();renderChat();input.focus();

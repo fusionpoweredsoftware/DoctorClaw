@@ -637,6 +637,14 @@ app.post('/api/chat', async (req, res) => {
     ...messages,
   ];
 
+  // AbortController to cancel the Ollama request when the client disconnects
+  const ollamaAbort = new AbortController();
+  let clientClosed = false;
+  req.on('close', () => {
+    clientClosed = true;
+    ollamaAbort.abort();
+  });
+
   try {
     const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST',
@@ -646,6 +654,7 @@ app.post('/api/chat', async (req, res) => {
         messages: ollamaMessages,
         stream: true,
       }),
+      signal: ollamaAbort.signal,
     });
 
     if (!resp.ok) {
@@ -666,6 +675,7 @@ app.post('/api/chat', async (req, res) => {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        if (clientClosed) break;
         buffer += decoder.decode(value, { stream: true });
         streamStarted = true;
         const lines = buffer.split('\n');
@@ -682,6 +692,11 @@ app.post('/api/chat', async (req, res) => {
         }
       }
     } catch (streamErr) {
+      // If the client closed the connection, just clean up silently
+      if (clientClosed) {
+        try { reader.cancel(); } catch {}
+        return;
+      }
       // Stream was interrupted mid-response — send error as an SSE event
       // so the frontend can display it gracefully instead of crashing
       const errMsg = streamErr.message || 'Connection to Ollama lost';
@@ -691,8 +706,10 @@ app.post('/api/chat', async (req, res) => {
         res.write('data: [DONE]\n\n');
       } catch { /* response may already be closed */ }
     }
-    res.end();
+    if (!clientClosed) res.end();
   } catch (err) {
+    // If client already disconnected, nothing to do
+    if (clientClosed) return;
     // If headers haven't been sent yet, we can return a proper JSON error
     if (!res.headersSent) {
       res.status(500).json({ error: 'Server error', detail: err.message });
