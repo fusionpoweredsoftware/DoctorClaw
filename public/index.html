@@ -268,14 +268,8 @@
   function mkS(){const n=new Date();return{id:'s_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),label:n.toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}),conversation:[],rendered:[],createdAt:n.toISOString()};}
   function cur(){return sessions.find(s=>s.id===activeId);}
 
-  // Merge-safe persist: re-read localStorage before writing so other tabs' sessions aren't lost
   function persist(){
-    const stored=loadS();
-    const myIds=new Set(sessions.map(s=>s.id));
-    // Keep any sessions from other tabs that we don't have in memory
-    const otherSessions=stored.filter(s=>!myIds.has(s.id));
-    const merged=[...sessions,...otherSessions];
-    saveS(merged);
+    saveS(sessions);
     sAI(activeId);
   }
 
@@ -413,7 +407,7 @@
         const data=await res.json();act.status='approved';act.result=data.result;act.resultSuccess=data.success;persist();
         const r=document.createElement('div');r.className='action-result '+(data.success?'success':'failure');r.textContent=data.result;rc.appendChild(r);ab.textContent='✓ Approved';
         cur().conversation.push({role:'user',content:'[Result of '+act.type+' on "'+act.target+'"]: '+(data.success?'SUCCESS':'FAILED')+'\n'+data.result});persist();
-        streaming=true;setSendBtnStreaming(true);await streamResp();streaming=false;setSendBtnStreaming(false);
+        streaming=true;setSendBtnStreaming(true);try{await streamResp();}finally{streaming=false;setSendBtnStreaming(false);}
       }catch(err){const r=document.createElement('div');r.className='action-result failure';r.textContent='Error: '+err.message;rc.appendChild(r);ab.textContent='✓ Approve';ab.disabled=false;db.disabled=false;}
       scrollDown();
     });
@@ -440,7 +434,7 @@
     if(!s.conversation.length){s.label=text.length>30?text.slice(0,30)+'…':text;renderTabs();}
     s.conversation.push({role:'user',content:text});s.rendered.push({role:'user',content:text});persist();
     input.value='';input.style.height='auto';renderChat();
-    streaming=true;setSendBtnStreaming(true);await streamResp();streaming=false;setSendBtnStreaming(false);input.focus();
+    streaming=true;setSendBtnStreaming(true);try{await streamResp();}finally{streaming=false;setSendBtnStreaming(false);}input.focus();
   }
 
   async function streamResp(){
@@ -450,18 +444,21 @@
     const b=document.createElement('div');b.className='message-body assistant-body';
     const dot=document.createElement('span');dot.className='streaming-dot';b.appendChild(dot);
     w.appendChild(l);w.appendChild(b);chatArea.appendChild(w);scrollDown();
-    let full='',aborted=false;
+    let full='',aborted=false,activeReader=null;
+    abortController.signal.addEventListener('abort',()=>{aborted=true;if(activeReader)try{activeReader.cancel();}catch{}});
     try{
-      const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:s.conversation}),signal:abortController.signal});
-      if(!res.ok){const err=await res.json();b.innerHTML=fmt('Error: '+(err.detail||err.error));s.rendered.push({role:'assistant',content:'Error: '+(err.detail||err.error)});persist();return;}
-      const reader=res.body.getReader();const dec=new TextDecoder();let buf='';
-      while(true){const{done,value}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop()||'';
+      const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:s.conversation})});
+      if(aborted){if(dot.parentNode)dot.remove();w.remove();return;}
+      if(!res.ok){let detail;try{const err=await res.json();detail=err.detail||err.error||'Unknown error';}catch{detail=res.statusText||'Request failed';}const errMsg='Error: '+detail;b.innerHTML=fmt(errMsg);s.conversation.push({role:'assistant',content:errMsg});s.rendered.push({role:'assistant',content:errMsg});persist();return;}
+      activeReader=res.body.getReader();const dec=new TextDecoder();let buf='';
+      while(true){const{done,value}=await activeReader.read();if(done||aborted)break;buf+=dec.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop()||'';
         for(const line of lines){if(line.startsWith('data: ')){const p=line.slice(6).trim();if(p==='[DONE]')continue;try{const j=JSON.parse(p);if(j.message?.content){full+=j.message.content;b.innerHTML=fmt(full.replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'').trim());scrollDown();}}catch{}}}}
     }catch(e){
-      if(e.name==='AbortError'){aborted=true;if(!full.trim()){if(dot.parentNode)dot.remove();w.remove();return;}}
+      if(aborted){if(!full.trim()){if(dot.parentNode)dot.remove();w.remove();return;}}
       else{full+='\n\n[Connection interrupted: '+e.message+'. Try sending your message again.]';b.innerHTML=fmt(full.replace(ACT_RE_STRIP,'').trim());scrollDown();}
     }
     if(dot.parentNode)dot.remove();
+    if(!full.trim())full='Hello! I\'m DoctorClaw, your system diagnostics assistant. How can I help you today?';
     b.innerHTML=fmt(full.replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'').trim());
     s.conversation.push({role:'assistant',content:full});
     const entry={role:'assistant',content:full,actions:[]};
@@ -528,7 +525,7 @@
     s.rendered.push({role:'user',content:newText});
     if(renderedIdx===0){s.label=newText.length>30?newText.slice(0,30)+'…':newText;renderTabs();}
     persist();renderChat();
-    streaming=true;setSendBtnStreaming(true);await streamResp();streaming=false;setSendBtnStreaming(false);input.focus();
+    streaming=true;setSendBtnStreaming(true);try{await streamResp();}finally{streaming=false;setSendBtnStreaming(false);}input.focus();
   }
 
   renderTabs();renderChat();input.focus();

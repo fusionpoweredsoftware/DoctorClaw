@@ -379,7 +379,6 @@ const MODEL = process.env.DOCTORCLAW_MODEL || config.model || 'glm-4.7:cloud';
 const OPENCLAW_DIR = config.openclaw_dir || '/opt/openclaw';
 const OS_TYPE = config.os || 'linux';
 const BACKUP_DIR = join(__dirname, '.doctorclaw-backups');
-const OPENCLAW_VALIDATION = validateOpenclawDir(OPENCLAW_DIR);
 
 // ── Safety ──────────────────────────────────────────────────────────────────
 
@@ -536,75 +535,17 @@ app.get('/api/health', async (_req, res) => {
 // ── Chat (streaming) ────────────────────────────────────────────────────────
 
 function buildSystemPrompt() {
-  // Build OpenClaw-specific context based on what we detected
-  let openclawContext = `- OpenClaw directory: ${OPENCLAW_DIR}`;
-  if (!OPENCLAW_VALIDATION.exists) {
-    openclawContext += ` (WARNING: this directory does NOT exist — it may be misconfigured)`;
-  }
-  if (OPENCLAW_VALIDATION.configPath) {
-    openclawContext += `\n- OpenClaw config file found at: ${OPENCLAW_VALIDATION.configPath}`;
-  }
-  if (OPENCLAW_VALIDATION.logPaths.length) {
-    openclawContext += `\n- OpenClaw log directories found: ${OPENCLAW_VALIDATION.logPaths.join(', ')}`;
-  }
-
   return `You are DoctorClaw, an expert system diagnostics and troubleshooting assistant. Your job is to help the user fix problems on their system — especially issues related to OpenClaw configuration and services, but also general Linux system issues.
 
 ENVIRONMENT:
 - Operating system: ${OS_TYPE}
-${openclawContext}
+- OpenClaw directory: ${OPENCLAW_DIR}
 - Server working directory: ${process.cwd()}
 - Config file location: ${CONFIG_PATH}
 - Readable paths: ${SAFE_READ_PATHS.join(', ')}
 - Writable paths: ${SAFE_WRITE_PATHS.join(', ')}
 - The user can add more paths by editing doctorclaw.config.json (read_paths and write_paths arrays).
 - IMPORTANT: There is a Settings panel in the DoctorClaw UI — the user can click the gear icon (⚙) in the top-right header to open it. The Settings panel lets the user configure: Ollama URL, model, port, OpenClaw directory, and all readable/writable paths. All changes are saved to doctorclaw.config.json automatically. Path changes take effect immediately without a restart. If a user asks how to configure paths or settings, ALWAYS direct them to the Settings panel (gear icon) first — do NOT tell them to manually edit the JSON file.
-
-OPENCLAW TROUBLESHOOTING GUIDE:
-When diagnosing OpenClaw issues, follow these steps in order. Do NOT guess paths — discover them.
-
-1. FIND OPENCLAW PROCESSES:
-   - Run: ps aux | grep -i openclaw | grep -v grep
-   - Common process names: openclaw-gateway, openclaw-api, openclaw-worker, openclaw-scheduler, openclaw
-   - Note the PID(s) and the full command path — the command path tells you where OpenClaw is installed
-
-2. FIND THE ACTUAL INSTALLATION DIRECTORY:
-   - If the configured directory (${OPENCLAW_DIR}) does not exist, use the process command path from step 1
-   - Run: readlink /proc/<PID>/cwd — this shows the working directory of a running process
-   - Run: readlink /proc/<PID>/exe — this shows the actual binary location
-   - Run: which openclaw-gateway — checks if it's on the PATH
-   - Check: /opt/openclaw, /usr/local/openclaw, /etc/openclaw, or under /home/
-
-3. FIND CONFIGURATION FILES:
-   - Check inside the OpenClaw directory for: config.yml, config.yaml, config.json, config.toml, openclaw.yml, openclaw.conf, gateway.yml, gateway.conf
-   - Also check subdirectories: etc/, conf/, config/
-   - Also check system-wide: /etc/openclaw/, /etc/openclaw.yml
-   - The config file usually specifies the listening port, log locations, database connections, and other service settings
-
-4. FIND LOG FILES:
-   - Check inside the OpenClaw directory for: logs/, log/, var/log/, var/logs/
-   - Check system logs: /var/log/openclaw/, /var/log/syslog, /var/log/messages
-   - Run: journalctl -u openclaw --no-pager -n 50 — if openclaw runs as a systemd service
-   - Run: journalctl -u openclaw-gateway --no-pager -n 50
-
-5. CHECK PORT BINDING:
-   - Run: ss -tlnp | grep <PID> — shows what ports a specific process is listening on
-   - Run: ss -tlnp | grep -E '18789|8080|8443|3000' — check common OpenClaw ports
-   - If a process is running but NOT listening on any port, it may be stuck during startup or failing to bind
-   - Read the config file (step 3) to find the EXPECTED port, then check if it's actually bound
-
-6. CHECK SERVICE STATUS:
-   - Run: systemctl status openclaw — if running as a systemd service
-   - Run: systemctl status openclaw-gateway
-   - Check if the service is enabled: systemctl is-enabled openclaw
-
-7. COMMON ISSUES AND FIXES:
-   - "Connection refused" on dashboard port: Process may not be running, may be starting up, or may be bound to a different port/interface. Check the config for the listen address (127.0.0.1 vs 0.0.0.0).
-   - Process running but no ports open: Check logs for startup errors, permission issues, or port conflicts (another process using the same port).
-   - OpenClaw directory not found: The installation may be in a non-standard location. Use process detection (step 1-2) to find it.
-   - Configuration changes not taking effect: The service may need to be restarted after config changes.
-
-IMPORTANT: If the configured OpenClaw directory does not exist, ALWAYS start by finding running openclaw processes to discover the actual installation location. Do not assume paths exist — verify them first.
 
 RULES:
 1. You can REQUEST actions (reading files, running commands, writing files) but you CANNOT execute them yourself. The user must approve each action.
@@ -626,7 +567,8 @@ RULES:
 12. When you have enough information, provide a clear diagnosis and treatment plan.
 13. If an action FAILS or is DENIED, explain to the user what went wrong in plain language, suggest an alternative approach, and continue troubleshooting. Do NOT stop or get stuck — always keep the conversation moving forward.
 14. If a path is denied due to access restrictions, tell the user which paths are currently writable, and let them know they can add more paths by clicking the gear icon (⚙) in the top-right corner to open Settings.
-15. Only write to paths listed in the writable paths above. If you need to write somewhere else, tell the user to add it to the config first.`;
+15. Only write to paths listed in the writable paths above. If you need to write somewhere else, tell the user to add it to the config first.
+16. If the user sends a casual greeting (like "hi", "hello", "hey", etc.) or a non-technical message, respond warmly and briefly. Introduce yourself as DoctorClaw, a system diagnostics assistant, and ask how you can help. Do NOT ignore greetings or return an empty response.`;
 }
 
 app.post('/api/chat', async (req, res) => {
@@ -637,14 +579,6 @@ app.post('/api/chat', async (req, res) => {
     ...messages,
   ];
 
-  // AbortController to cancel the Ollama request when the client disconnects
-  const ollamaAbort = new AbortController();
-  let clientClosed = false;
-  req.on('close', () => {
-    clientClosed = true;
-    ollamaAbort.abort();
-  });
-
   try {
     const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST',
@@ -654,7 +588,6 @@ app.post('/api/chat', async (req, res) => {
         messages: ollamaMessages,
         stream: true,
       }),
-      signal: ollamaAbort.signal,
     });
 
     if (!resp.ok) {
@@ -669,58 +602,27 @@ app.post('/api/chat', async (req, res) => {
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    let streamStarted = false;
 
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (clientClosed) break;
-        buffer += decoder.decode(value, { stream: true });
-        streamStarted = true;
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const parsed = JSON.parse(line);
-            res.write(`data: ${JSON.stringify(parsed)}\n\n`);
-            if (parsed.done) {
-              res.write('data: [DONE]\n\n');
-            }
-          } catch { /* skip malformed */ }
-        }
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const parsed = JSON.parse(line);
+          res.write(`data: ${JSON.stringify(parsed)}\n\n`);
+          if (parsed.done) {
+            res.write('data: [DONE]\n\n');
+          }
+        } catch { /* skip malformed */ }
       }
-    } catch (streamErr) {
-      // If the client closed the connection, just clean up silently
-      if (clientClosed) {
-        try { reader.cancel(); } catch {}
-        return;
-      }
-      // Stream was interrupted mid-response — send error as an SSE event
-      // so the frontend can display it gracefully instead of crashing
-      const errMsg = streamErr.message || 'Connection to Ollama lost';
-      console.error(`  Stream error: ${errMsg}`);
-      try {
-        res.write(`data: ${JSON.stringify({ message: { content: `\n\n[Stream interrupted: ${errMsg}. The Ollama connection was lost mid-response. Try sending your message again.]` }, done: true })}\n\n`);
-        res.write('data: [DONE]\n\n');
-      } catch { /* response may already be closed */ }
     }
-    if (!clientClosed) res.end();
+    res.end();
   } catch (err) {
-    // If client already disconnected, nothing to do
-    if (clientClosed) return;
-    // If headers haven't been sent yet, we can return a proper JSON error
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Server error', detail: err.message });
-    } else {
-      // Headers already sent (streaming started), send error as SSE
-      try {
-        res.write(`data: ${JSON.stringify({ message: { content: `\n\n[Error: ${err.message}]` }, done: true })}\n\n`);
-        res.write('data: [DONE]\n\n');
-      } catch { /* response may already be closed */ }
-      res.end();
-    }
+    res.status(500).json({ error: 'Server error', detail: err.message });
   }
 });
 
