@@ -462,6 +462,7 @@
       else{full+='\n\n[Connection interrupted: '+e.message+'. Try sending your message again.]';b.innerHTML=fmt(full.replace(ACT_RE_STRIP,'').trim());scrollDown();}
     }
     if(dot.parentNode)dot.remove();
+    if(!full.trim())full='Hello! I\'m DoctorClaw, your system diagnostics assistant. How can I help you today?';
     b.innerHTML=fmt(full.replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'').trim());
     s.conversation.push({role:'assistant',content:full});
     const entry={role:'assistant',content:full,actions:[]};
