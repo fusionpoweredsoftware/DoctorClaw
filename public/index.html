@@ -721,6 +721,8 @@
           input.placeholder=prevPlaceholder;
           input.disabled=false;
           input.focus();
+          // Auto-send after transcription completes
+          if(input.value.trim()) sendMsg();
         };
         reader.readAsDataURL(audioBlob);
       };
