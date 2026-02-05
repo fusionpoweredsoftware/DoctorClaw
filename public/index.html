@@ -651,89 +651,101 @@
     streaming=true;setSendBtnStreaming(true);try{await streamResp();}finally{streaming=false;setSendBtnStreaming(false);}input.focus();
   }
 
-  // ── Audio Feature: Speech-to-Text & Text-to-Speech ──
+  // ── Audio Feature: Speech-to-Text (MediaRecorder + ElevenLabs Scribe) ──
 
   const MIC_ICON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
   const STOP_MIC_ICON='<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
 
-  let recognition=null, isRecording=false, sttFinalText='', sttBaseText='', sttRestartTimer=null;
+  let isRecording=false, mediaRecorder=null, mediaStream=null, audioChunks=[], sttBaseText='';
 
   function updateAudioBtnVisibility(){
     if(audioEnabled) audioBtn.classList.add('visible');
     else { audioBtn.classList.remove('visible'); if(isRecording) stopRecording(); }
   }
 
-  function initSpeechRecognition(){
-    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-    if(!SR) return;
-    recognition=new SR();
-    recognition.continuous=true;
-    recognition.interimResults=true;
-    recognition.lang='en-US';
-    recognition.onresult=e=>{
-      let finalChunk='', interim='';
-      for(let i=e.resultIndex;i<e.results.length;i++){
-        const t=e.results[i][0].transcript;
-        if(e.results[i].isFinal) finalChunk+=t;
-        else interim+=t;
-      }
-      sttFinalText+=finalChunk;
-      const sep=(sttBaseText&&(sttFinalText||interim))?' ':'';
-      input.value=sttBaseText+sep+sttFinalText+interim;
-      input.style.height='auto';
-      input.style.height=Math.min(input.scrollHeight,160)+'px';
-    };
-    recognition.onerror=e=>{
-      // Stop on any error — network, audio-capture, not-allowed, aborted, etc.
-      console.warn('Speech recognition error:',e.error);
-      stopRecording();
-    };
-    recognition.onend=()=>{
-      // Browser fires onend after silence or network timeout even in continuous mode;
-      // restart after a short delay to avoid rapid cycling on persistent errors.
-      if(isRecording){
-        sttRestartTimer=setTimeout(()=>{
-          if(isRecording){try{recognition.start();}catch{stopRecording();}}
-        },300);
-      }
-    };
+  function getSupportedMimeType(){
+    const types=['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'];
+    for(const t of types) if(MediaRecorder.isTypeSupported(t)) return t;
+    return '';
   }
 
-  async function startRecording(){
-    if(!recognition) initSpeechRecognition();
-    if(!recognition) return;
-    // Explicitly request microphone permission first so the browser shows the prompt
-    try{
-      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
-      stream.getTracks().forEach(t=>t.stop());
-    }catch{
-      console.warn('Microphone permission denied');
-      return;
-    }
-    sttBaseText=input.value;
-    sttFinalText='';
-    isRecording=true;
-    audioBtn.innerHTML=STOP_MIC_ICON;
-    audioBtn.classList.add('recording');
-    audioBtn.title='Stop listening';
-    try{recognition.start();}catch{stopRecording();}
+  function startRecording(){
+    navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
+      mediaStream=stream;
+      const mimeType=getSupportedMimeType();
+      mediaRecorder=new MediaRecorder(stream, mimeType?{mimeType}:{});
+      audioChunks=[];
+
+      mediaRecorder.ondataavailable=e=>{
+        if(e.data.size>0) audioChunks.push(e.data);
+      };
+
+      mediaRecorder.onstop=async()=>{
+        if(mediaStream){mediaStream.getTracks().forEach(t=>t.stop());mediaStream=null;}
+        if(!audioChunks.length) return;
+
+        const mType=mediaRecorder.mimeType||'audio/webm';
+        const audioBlob=new Blob(audioChunks,{type:mType});
+        audioChunks=[];
+
+        // Convert to base64 and send for transcription
+        const reader=new FileReader();
+        reader.onloadend=async()=>{
+          const base64=reader.result.split(',')[1];
+          if(!base64) return;
+
+          const prevPlaceholder=input.placeholder;
+          input.placeholder='Transcribing…';
+          input.disabled=true;
+
+          try{
+            const resp=await fetch('/api/stt',{
+              method:'POST',
+              headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({audio:base64,mimeType:mType}),
+            });
+            if(resp.ok){
+              const data=await resp.json();
+              if(data.text){
+                const sep=sttBaseText?' ':'';
+                input.value=sttBaseText+sep+data.text;
+                input.style.height='auto';
+                input.style.height=Math.min(input.scrollHeight,160)+'px';
+              }
+            }else{
+              const err=await resp.json().catch(()=>({}));
+              console.warn('STT error:',err.error||'Unknown error');
+            }
+          }catch(e){console.warn('STT request failed:',e);}
+
+          input.placeholder=prevPlaceholder;
+          input.disabled=false;
+          input.focus();
+        };
+        reader.readAsDataURL(audioBlob);
+      };
+
+      sttBaseText=input.value;
+      isRecording=true;
+      audioBtn.innerHTML=STOP_MIC_ICON;
+      audioBtn.classList.add('recording');
+      audioBtn.title='Stop listening';
+      mediaRecorder.start();
+    }).catch(err=>{
+      console.warn('Microphone access denied:',err);
+    });
   }
 
   function stopRecording(){
     isRecording=false;
-    if(sttRestartTimer){clearTimeout(sttRestartTimer);sttRestartTimer=null;}
-    if(recognition) try{recognition.stop();}catch{}
     audioBtn.innerHTML=MIC_ICON;
     audioBtn.classList.remove('recording');
     audioBtn.title='Voice input';
-    // Commit final text
-    if(sttFinalText){
-      const sep=sttBaseText?' ':'';
-      input.value=sttBaseText+sep+sttFinalText;
+    if(mediaRecorder&&mediaRecorder.state!=='inactive'){
+      mediaRecorder.stop();
+    }else{
+      if(mediaStream){mediaStream.getTracks().forEach(t=>t.stop());mediaStream=null;}
     }
-    sttFinalText='';sttBaseText='';
-    input.style.height='auto';
-    input.style.height=Math.min(input.scrollHeight,160)+'px';
   }
 
   audioBtn.addEventListener('click',()=>{

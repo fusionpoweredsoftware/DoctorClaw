@@ -587,6 +587,49 @@ app.post('/api/tts', async (req, res) => {
   }
 });
 
+// ── ElevenLabs STT Proxy (Scribe) ────────────────────────────────────────────
+
+app.post('/api/stt', async (req, res) => {
+  const { audio, mimeType } = req.body;
+  if (!audio) {
+    return res.status(400).json({ error: 'No audio data provided' });
+  }
+
+  let current = {};
+  try { current = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')); } catch {}
+
+  const apiKey = current.elevenlabs_api_key;
+  if (!apiKey) {
+    return res.status(400).json({ error: 'ElevenLabs API key not configured' });
+  }
+
+  try {
+    const audioBuffer = Buffer.from(audio, 'base64');
+    const ext = (mimeType || '').includes('ogg') ? 'ogg' : (mimeType || '').includes('mp4') ? 'mp4' : 'webm';
+    const blob = new Blob([audioBuffer], { type: mimeType || 'audio/webm' });
+
+    const formData = new FormData();
+    formData.append('file', blob, `recording.${ext}`);
+    formData.append('model_id', 'scribe_v2');
+
+    const sttResp = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
+      method: 'POST',
+      headers: { 'xi-api-key': apiKey },
+      body: formData,
+    });
+
+    if (!sttResp.ok) {
+      const errText = await sttResp.text();
+      return res.status(sttResp.status).json({ error: errText });
+    }
+
+    const result = await sttResp.json();
+    res.json({ text: result.text || '' });
+  } catch (err) {
+    res.status(500).json({ error: 'STT request failed: ' + err.message });
+  }
+});
+
 // ── Chat (streaming) ────────────────────────────────────────────────────────
 
 function buildSystemPrompt() {
