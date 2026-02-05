@@ -656,7 +656,7 @@
   const MIC_ICON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
   const STOP_MIC_ICON='<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
 
-  let recognition=null, isRecording=false, sttFinalText='', sttBaseText='';
+  let recognition=null, isRecording=false, sttFinalText='', sttBaseText='', sttRestartTimer=null;
 
   function updateAudioBtnVisibility(){
     if(audioEnabled) audioBtn.classList.add('visible');
@@ -684,18 +684,32 @@
       input.style.height=Math.min(input.scrollHeight,160)+'px';
     };
     recognition.onerror=e=>{
-      if(e.error==='not-allowed'||e.error==='service-not-allowed'){
-        stopRecording();
-      }
+      // Stop on any error — network, audio-capture, not-allowed, aborted, etc.
+      console.warn('Speech recognition error:',e.error);
+      stopRecording();
     };
     recognition.onend=()=>{
-      if(isRecording){try{recognition.start();}catch{stopRecording();}}
+      // Browser fires onend after silence or network timeout even in continuous mode;
+      // restart after a short delay to avoid rapid cycling on persistent errors.
+      if(isRecording){
+        sttRestartTimer=setTimeout(()=>{
+          if(isRecording){try{recognition.start();}catch{stopRecording();}}
+        },300);
+      }
     };
   }
 
-  function startRecording(){
+  async function startRecording(){
     if(!recognition) initSpeechRecognition();
     if(!recognition) return;
+    // Explicitly request microphone permission first so the browser shows the prompt
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      stream.getTracks().forEach(t=>t.stop());
+    }catch{
+      console.warn('Microphone permission denied');
+      return;
+    }
     sttBaseText=input.value;
     sttFinalText='';
     isRecording=true;
@@ -707,6 +721,7 @@
 
   function stopRecording(){
     isRecording=false;
+    if(sttRestartTimer){clearTimeout(sttRestartTimer);sttRestartTimer=null;}
     if(recognition) try{recognition.stop();}catch{}
     audioBtn.innerHTML=MIC_ICON;
     audioBtn.classList.remove('recording');
