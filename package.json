@@ -1,0 +1,18 @@
+{
+  "name": "doctorclaw",
+  "version": "1.0.0",
+  "description": "",
+  "type": "module",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "setup": "node server.mjs -i",
+    "start:quick": "node server.mjs -y"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}

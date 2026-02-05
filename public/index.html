@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DoctorClaw</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root { --font-body: 'Outfit', sans-serif; --font-mono: 'DM Mono', monospace; --radius: 12px; --radius-sm: 8px; --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
+  [data-theme="light"] {
+    --bg-base: #F4F2EF; --bg-surface: #FFFFFF; --bg-surface-hover: #FAF9F7; --bg-inset: #EDEAE6;
+    --bg-chat-user: #E8E5E0; --bg-chat-assistant: transparent; --border: #DDD9D3; --border-subtle: #E8E5E0;
+    --text-primary: #1A1917; --text-secondary: #6B6762; --text-tertiary: #9C9790;
+    --accent: #2D7A6F; --accent-hover: #236B61; --accent-subtle: #E6F3F0; --accent-text: #FFFFFF;
+    --danger: #C74A4A; --danger-hover: #B03E3E; --danger-subtle: #FCEAEA;
+    --success: #3A8F6E; --success-subtle: #E6F5EE; --warning: #C4890C; --warning-subtle: #FFF5E0;
+    --code-bg: #F0EDE9; --tab-active: #FFFFFF; --tab-hover: #FAF9F7; --overlay: rgba(0,0,0,0.3);
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.04); --shadow-md: 0 4px 16px rgba(0,0,0,0.06); --shadow-lg: 0 8px 32px rgba(0,0,0,0.08);
+  }
+  [data-theme="dark"] {
+    --bg-base: #141413; --bg-surface: #1E1E1C; --bg-surface-hover: #252523; --bg-inset: #111110;
+    --bg-chat-user: #2A2A27; --bg-chat-assistant: transparent; --border: #333330; --border-subtle: #2A2A27;
+    --text-primary: #E8E5E0; --text-secondary: #9C9790; --text-tertiary: #6B6762;
+    --accent: #4DC9B4; --accent-hover: #5DD9C4; --accent-subtle: #1A2F2B; --accent-text: #111110;
+    --danger: #E06B6B; --danger-hover: #E88080; --danger-subtle: #2D1A1A;
+    --success: #5CC99A; --success-subtle: #1A2D22; --warning: #E0A830; --warning-subtle: #2D2510;
+    --code-bg: #252523; --tab-active: #252523; --tab-hover: #1E1E1C; --overlay: rgba(0,0,0,0.6);
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.2); --shadow-md: 0 4px 16px rgba(0,0,0,0.3); --shadow-lg: 0 8px 32px rgba(0,0,0,0.4);
+  }
+  html { height: 100%; }
+  body { font-family: var(--font-body); background: var(--bg-base); color: var(--text-primary); height: 100%; overflow: hidden; transition: background var(--transition), color var(--transition); }
+  .app { display: flex; flex-direction: column; height: 100vh; max-width: 900px; margin: 0 auto; }
+  .header { display: flex; align-items: center; justify-content: space-between; padding: 14px 24px; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand-icon { width: 34px; height: 34px; background: var(--accent); border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 17px; color: var(--accent-text); font-weight: 600; box-shadow: var(--shadow-sm); }
+  .brand-text h1 { font-size: 16px; font-weight: 600; letter-spacing: -0.3px; line-height: 1.2; }
+  .brand-text span { font-size: 11px; color: var(--text-tertiary); }
+  .header-actions { display: flex; align-items: center; gap: 8px; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-tertiary); transition: background var(--transition); }
+  .status-dot.ok { background: var(--success); } .status-dot.err { background: var(--danger); }
+  .status-label { font-size: 12px; color: var(--text-tertiary); margin-right: 8px; }
+  .btn-icon { width: 34px; height: 34px; border: 1px solid var(--border); background: var(--bg-surface); border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all var(--transition); color: var(--text-secondary); }
+  .btn-icon:hover { background: var(--bg-surface-hover); border-color: var(--text-tertiary); }
+  .btn-icon svg { width: 17px; height: 17px; }
+  .tabs-bar { display: flex; align-items: center; gap: 2px; padding: 8px 24px 0; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; overflow-x: auto; scrollbar-width: none; }
+  .tabs-bar::-webkit-scrollbar { display: none; }
+  .tab { display: flex; align-items: center; gap: 6px; padding: 8px 14px; font-family: var(--font-body); font-size: 12.5px; font-weight: 500; color: var(--text-tertiary); background: transparent; border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0; cursor: pointer; white-space: nowrap; transition: all var(--transition); max-width: 180px; }
+  .tab:hover { color: var(--text-secondary); background: var(--tab-hover); }
+  .tab.active { color: var(--text-primary); background: var(--tab-active); border-color: var(--border-subtle); box-shadow: var(--shadow-sm); }
+  .tab-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
+  .tab-close { width: 16px; height: 16px; border: none; background: transparent; color: var(--text-tertiary); cursor: pointer; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1; padding: 0; flex-shrink: 0; transition: all var(--transition); }
+  .tab-close:hover { background: var(--danger-subtle); color: var(--danger); }
+  .tab-new { padding: 8px 10px; font-family: var(--font-body); font-size: 16px; color: var(--text-tertiary); background: transparent; border: 1px dashed var(--border); border-bottom: none; border-radius: 8px 8px 0 0; cursor: pointer; transition: all var(--transition); flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 34px; }
+  .tab-new:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-subtle); }
+  .chat-area { flex: 1; overflow-y: auto; padding: 24px; scroll-behavior: smooth; }
+  .chat-area::-webkit-scrollbar { width: 6px; } .chat-area::-webkit-scrollbar-track { background: transparent; } .chat-area::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .welcome { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 16px; opacity: 0.8; }
+  .welcome-icon { width: 64px; height: 64px; background: var(--accent-subtle); border-radius: 20px; display: flex; align-items: center; justify-content: center; font-size: 28px; }
+  .welcome h2 { font-size: 22px; font-weight: 600; letter-spacing: -0.5px; }
+  .welcome p { font-size: 14px; color: var(--text-secondary); text-align: center; max-width: 400px; line-height: 1.6; }
+  .message { margin-bottom: 20px; animation: msgIn 0.3s ease-out; } .message.no-anim { animation: none; }
+  @keyframes msgIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .message-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-tertiary); margin-bottom: 6px; padding-left: 2px; }
+  .message-label.assistant-label { color: var(--accent); }
+  .message-body { padding: 14px 18px; border-radius: var(--radius); font-size: 14.5px; line-height: 1.7; white-space: pre-wrap; word-wrap: break-word; }
+  .message-body.user-body { background: var(--bg-chat-user); border: 1px solid var(--border-subtle); }
+  .message-body.assistant-body { background: var(--bg-chat-assistant); }
+  .message-body code { font-family: var(--font-mono); font-size: 13px; background: var(--code-bg); padding: 2px 6px; border-radius: 4px; }
+  .message-body pre { background: var(--code-bg); padding: 12px 16px; border-radius: var(--radius-sm); overflow-x: auto; margin: 8px 0; border: 1px solid var(--border-subtle); }
+  .message-body pre code { background: none; padding: 0; }
+  .action-card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius); margin: 12px 0; overflow: hidden; box-shadow: var(--shadow-sm); animation: msgIn 0.3s ease-out; }
+  .action-card.no-anim { animation: none; }
+  .action-header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-inset); }
+  .action-type-badge { font-family: var(--font-mono); font-size: 11px; font-weight: 500; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .action-type-badge.read { background: var(--accent-subtle); color: var(--accent); }
+  .action-type-badge.cmd { background: var(--warning-subtle); color: var(--warning); }
+  .action-type-badge.script { background: var(--warning-subtle); color: var(--warning); }
+  .action-type-badge.write { background: var(--danger-subtle); color: var(--danger); }
+  .action-target { font-family: var(--font-mono); font-size: 13px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .action-body { padding: 12px 16px; }
+  .action-content-preview { font-family: var(--font-mono); font-size: 12px; background: var(--code-bg); padding: 10px 12px; border-radius: var(--radius-sm); margin-bottom: 12px; max-height: 120px; overflow-y: auto; white-space: pre-wrap; color: var(--text-secondary); border: 1px solid var(--border-subtle); }
+  .action-buttons { display: flex; gap: 8px; }
+  .btn { font-family: var(--font-body); font-size: 13px; font-weight: 500; padding: 8px 20px; border-radius: var(--radius-sm); border: none; cursor: pointer; transition: all var(--transition); display: inline-flex; align-items: center; gap: 6px; }
+  .btn-approve { background: var(--accent); color: var(--accent-text); } .btn-approve:hover { background: var(--accent-hover); }
+  .btn-deny { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); } .btn-deny:hover { background: var(--danger-subtle); color: var(--danger); border-color: var(--danger); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .action-result { margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; max-height: 200px; overflow-y: auto; line-height: 1.5; }
+  .action-result.success { background: var(--success-subtle); color: var(--success); border: 1px solid var(--success); }
+  .action-result.failure { background: var(--danger-subtle); color: var(--danger); border: 1px solid var(--danger); }
+  .action-result.denied { background: var(--bg-inset); color: var(--text-tertiary); border: 1px solid var(--border); }
+  .streaming-dot { display: inline-block; width: 6px; height: 6px; background: var(--accent); border-radius: 50%; margin-left: 4px; animation: blink 1s ease-in-out infinite; vertical-align: middle; }
+  @keyframes blink { 0%, 100% { opacity: 0.2; } 50% { opacity: 1; } }
+  .input-area { padding: 16px 24px 24px; border-top: 1px solid var(--border-subtle); flex-shrink: 0; }
+  .input-wrapper { display: flex; gap: 10px; align-items: flex-end; }
+  .input-field { flex: 1; font-family: var(--font-body); font-size: 14.5px; padding: 12px 16px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); resize: none; min-height: 46px; max-height: 160px; line-height: 1.5; transition: border var(--transition), box-shadow var(--transition); outline: none; }
+  .input-field::placeholder { color: var(--text-tertiary); }
+  .input-field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-subtle); }
+  .btn-send { width: 46px; height: 46px; background: var(--accent); color: var(--accent-text); border: none; border-radius: var(--radius); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all var(--transition); flex-shrink: 0; }
+  .btn-send:hover { background: var(--accent-hover); transform: scale(1.04); }
+  .btn-send:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  .btn-send svg { width: 20px; height: 20px; }
+  .input-hint { font-size: 11px; color: var(--text-tertiary); margin-top: 8px; text-align: center; }
+
+  /* ── Settings ── */
+  .settings-overlay { position: fixed; inset: 0; background: var(--overlay); z-index: 100; display: none; align-items: center; justify-content: center; animation: fadeIn 0.2s ease-out; }
+  .settings-overlay.open { display: flex; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .settings-panel { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 16px; width: 90%; max-width: 540px; max-height: 85vh; display: flex; flex-direction: column; box-shadow: var(--shadow-lg); animation: slideUp 0.25s ease-out; }
+  @keyframes slideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+  .settings-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px 16px; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }
+  .settings-header h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.3px; }
+  .settings-close { width: 32px; height: 32px; border: none; background: transparent; color: var(--text-tertiary); cursor: pointer; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; font-size: 20px; transition: all var(--transition); }
+  .settings-close:hover { background: var(--bg-inset); color: var(--text-primary); }
+  .settings-body { padding: 20px 24px; overflow-y: auto; flex: 1; }
+  .field { margin-bottom: 20px; }
+  .field-label { font-size: 13px; font-weight: 500; color: var(--text-primary); margin-bottom: 6px; display: block; }
+  .field-hint { font-size: 11.5px; color: var(--text-tertiary); margin-bottom: 8px; line-height: 1.4; }
+  .field-input { width: 100%; font-family: var(--font-mono); font-size: 13px; padding: 10px 14px; background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); outline: none; transition: border var(--transition); }
+  .field-input:focus { border-color: var(--accent); }
+  .path-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+  .path-row { display: flex; gap: 6px; align-items: center; }
+  .path-row .field-input { flex: 1; margin: 0; }
+  .path-remove { width: 32px; height: 32px; border: 1px solid var(--border); background: transparent; color: var(--text-tertiary); cursor: pointer; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; font-size: 16px; transition: all var(--transition); flex-shrink: 0; }
+  .path-remove:hover { background: var(--danger-subtle); color: var(--danger); border-color: var(--danger); }
+  .path-add { font-family: var(--font-body); font-size: 12px; font-weight: 500; padding: 6px 14px; background: transparent; border: 1px dashed var(--border); border-radius: var(--radius-sm); color: var(--text-tertiary); cursor: pointer; transition: all var(--transition); display: inline-flex; }
+  .path-add:hover { color: var(--accent); border-color: var(--accent); }
+  .settings-footer { padding: 16px 24px 20px; border-top: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-shrink: 0; }
+  .save-msg { font-size: 12px; color: var(--success); flex: 1; } .save-msg.err { color: var(--danger); }
+  .btn-save { font-family: var(--font-body); font-size: 13px; font-weight: 500; padding: 10px 24px; background: var(--accent); color: var(--accent-text); border: none; border-radius: var(--radius-sm); cursor: pointer; transition: all var(--transition); white-space: nowrap; }
+  .btn-save:hover { background: var(--accent-hover); }
+
+  @media (max-width: 640px) {
+    .header { padding: 12px 16px; } .tabs-bar { padding: 8px 16px 0; } .chat-area { padding: 16px; } .input-area { padding: 12px 16px 20px; }
+    .brand-text span { display: none; } .tab { max-width: 130px; padding: 7px 10px; }
+    .settings-panel { width: 95%; max-height: 90vh; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="header">
+    <div class="brand">
+      <div class="brand-icon">🩺</div>
+      <div class="brand-text"><h1>DoctorClaw</h1><span>System Diagnostics</span></div>
+    </div>
+    <div class="header-actions">
+      <div class="status-dot" id="statusDot"></div>
+      <span class="status-label" id="statusLabel">Checking…</span>
+      <button class="btn-icon" id="settingsBtn" title="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+      <button class="btn-icon" id="themeToggle" title="Toggle theme">
+        <svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+  <div class="tabs-bar" id="tabsBar"><button class="tab-new" id="newTabBtn" title="New session">+</button></div>
+  <div class="chat-area" id="chatArea"></div>
+  <div class="input-area">
+    <div class="input-wrapper">
+      <textarea class="input-field" id="input" placeholder="Describe the issue…" rows="1"></textarea>
+      <button class="btn-send" id="sendBtn" title="Send">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+        </svg>
+      </button>
+    </div>
+    <div class="input-hint">Actions require your explicit approval before execution</div>
+  </div>
+</div>
+
+<!-- Settings -->
+<div class="settings-overlay" id="settingsOverlay">
+  <div class="settings-panel">
+    <div class="settings-header"><h2>Settings</h2><button class="settings-close" id="settingsClose">×</button></div>
+    <div class="settings-body">
+      <div class="field">
+        <label class="field-label">Ollama URL</label>
+        <input class="field-input" id="cfgOllamaUrl" type="text" placeholder="http://localhost:11434">
+      </div>
+      <div class="field">
+        <label class="field-label">Model</label>
+        <input class="field-input" id="cfgModel" type="text" placeholder="glm-4.7:cloud">
+      </div>
+      <div class="field">
+        <label class="field-label">Port</label>
+        <div class="field-hint">Requires restart to take effect.</div>
+        <input class="field-input" id="cfgPort" type="number" placeholder="3333">
+      </div>
+      <div class="field">
+        <label class="field-label">OpenClaw Directory</label>
+        <div class="field-hint">Main directory of your OpenClaw installation. Automatically included in read and write paths.</div>
+        <input class="field-input" id="cfgOpenclawDir" type="text" placeholder="/opt/openclaw">
+      </div>
+      <div class="field">
+        <label class="field-label">Operating System</label>
+        <div class="field-hint">Tells DoctorClaw which commands and shell syntax to use.</div>
+        <select class="field-input" id="cfgOs">
+          <option value="linux">Linux</option>
+          <option value="macos">macOS</option>
+          <option value="windows">Windows</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label">Readable Paths</label>
+        <div class="field-hint">Directories DoctorClaw is allowed to read from. Changes take effect immediately.</div>
+        <div class="path-list" id="readPathsList"></div>
+        <button class="path-add" id="addReadPath">+ Add path</button>
+      </div>
+      <div class="field">
+        <label class="field-label">Writable Paths</label>
+        <div class="field-hint">Directories DoctorClaw is allowed to write to. Changes take effect immediately.</div>
+        <div class="path-list" id="writePathsList"></div>
+        <button class="path-add" id="addWritePath">+ Add path</button>
+      </div>
+    </div>
+    <div class="settings-footer">
+      <div class="save-msg" id="saveMsg"></div>
+      <button class="btn-save" id="saveSettings">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const SK='doctorclaw-sessions', AK='doctorclaw-active-session';
+  function loadS(){try{return JSON.parse(localStorage.getItem(SK))||[];}catch{return[];}}
+  function saveS(s){localStorage.setItem(SK,JSON.stringify(s));}
+  function gAI(){return localStorage.getItem(AK);}
+  function sAI(id){localStorage.setItem(AK,id);}
+  let sessions=loadS(),activeId=gAI(),streaming=false;
+  if(!sessions.length){const s=mkS();sessions.push(s);activeId=s.id;persist();}
+  else if(!sessions.find(s=>s.id===activeId)){activeId=sessions[0].id;persist();}
+  function mkS(){const n=new Date();return{id:'s_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),label:n.toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}),conversation:[],rendered:[],createdAt:n.toISOString()};}
+  function cur(){return sessions.find(s=>s.id===activeId);}
+
+  // Merge-safe persist: re-read localStorage before writing so other tabs' sessions aren't lost
+  function persist(){
+    const stored=loadS();
+    const myIds=new Set(sessions.map(s=>s.id));
+    // Keep any sessions from other tabs that we don't have in memory
+    const otherSessions=stored.filter(s=>!myIds.has(s.id));
+    const merged=[...sessions,...otherSessions];
+    saveS(merged);
+    sAI(activeId);
+  }
+
+  // Cross-tab sync: when another tab writes to localStorage, reload
+  window.addEventListener('storage',e=>{
+    if(e.key===SK&&!streaming){
+      const fresh=loadS();
+      // Preserve our active session's in-memory state if we're mid-conversation
+      const currentActive=cur();
+      sessions=fresh;
+      if(currentActive){
+        const idx=sessions.findIndex(s=>s.id===currentActive.id);
+        if(idx>-1)sessions[idx]=currentActive;
+      }
+      renderTabs();renderChat();
+    }
+  });
+
+  const chatArea=document.getElementById('chatArea'),input=document.getElementById('input'),sendBtn=document.getElementById('sendBtn'),
+    tabsBar=document.getElementById('tabsBar'),newTabBtn=document.getElementById('newTabBtn'),themeToggle=document.getElementById('themeToggle'),
+    statusDot=document.getElementById('statusDot'),statusLabel=document.getElementById('statusLabel');
+
+  // Theme
+  const st=localStorage.getItem('dc-theme')||'light';document.documentElement.setAttribute('data-theme',st);updTI();
+  themeToggle.addEventListener('click',()=>{const nx=document.documentElement.getAttribute('data-theme')==='light'?'dark':'light';document.documentElement.setAttribute('data-theme',nx);localStorage.setItem('dc-theme',nx);updTI();});
+  function updTI(){const d=document.documentElement.getAttribute('data-theme')==='dark';document.getElementById('themeIcon').innerHTML=d?'<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>':'<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';}
+
+  // Health
+  async function chk(){try{const r=await fetch('/api/health');const d=await r.json();statusDot.className=d.status==='ok'?'status-dot ok':'status-dot err';statusLabel.textContent=d.status==='ok'?'Connected':'Offline';}catch{statusDot.className='status-dot err';statusLabel.textContent='Offline';}}
+  chk();setInterval(chk,15000);
+
+  // Settings
+  const sOverlay=document.getElementById('settingsOverlay'),sBtn=document.getElementById('settingsBtn'),sClose=document.getElementById('settingsClose'),saveBtn=document.getElementById('saveSettings'),saveMsg=document.getElementById('saveMsg');
+  sBtn.addEventListener('click',openSettings);sClose.addEventListener('click',()=>sOverlay.classList.remove('open'));
+  sOverlay.addEventListener('click',e=>{if(e.target===sOverlay)sOverlay.classList.remove('open');});
+
+  async function openSettings(){
+    saveMsg.textContent='';
+    try{
+      const r=await fetch('/api/config');const cfg=await r.json();
+      document.getElementById('cfgOllamaUrl').value=cfg.ollama_url||'';
+      document.getElementById('cfgModel').value=cfg.model||'';
+      document.getElementById('cfgPort').value=cfg.port||'';
+      document.getElementById('cfgOpenclawDir').value=cfg.openclaw_dir||'';
+      document.getElementById('cfgOs').value=cfg.os||'linux';
+      renderPL('readPathsList',cfg.read_paths||[]);
+      renderPL('writePathsList',cfg.write_paths||[]);
+    }catch{saveMsg.textContent='Could not load config.';saveMsg.className='save-msg err';}
+    sOverlay.classList.add('open');
+  }
+
+  function renderPL(id,paths){
+    const c=document.getElementById(id);c.innerHTML='';
+    paths.forEach(p=>{addPathRow(c,p);});
+  }
+  function addPathRow(container,value){
+    const row=document.createElement('div');row.className='path-row';
+    const inp=document.createElement('input');inp.className='field-input';inp.type='text';inp.value=value||'';inp.placeholder='/path/to/directory';
+    const rm=document.createElement('button');rm.className='path-remove';rm.textContent='×';rm.title='Remove';
+    rm.addEventListener('click',()=>row.remove());
+    row.appendChild(inp);row.appendChild(rm);container.appendChild(row);
+    if(!value)inp.focus();
+  }
+  document.getElementById('addReadPath').addEventListener('click',()=>addPathRow(document.getElementById('readPathsList'),''));
+  document.getElementById('addWritePath').addEventListener('click',()=>addPathRow(document.getElementById('writePathsList'),''));
+
+  function gatherPaths(id){return Array.from(document.querySelectorAll('#'+id+' .field-input')).map(i=>i.value.trim()).filter(Boolean);}
+
+  saveBtn.addEventListener('click',async()=>{
+    saveMsg.textContent='Saving…';saveMsg.className='save-msg';
+    try{
+      const body={ollama_url:document.getElementById('cfgOllamaUrl').value.trim(),model:document.getElementById('cfgModel').value.trim(),port:document.getElementById('cfgPort').value.trim(),openclaw_dir:document.getElementById('cfgOpenclawDir').value.trim(),os:document.getElementById('cfgOs').value,read_paths:gatherPaths('readPathsList'),write_paths:gatherPaths('writePathsList')};
+      const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const d=await r.json();saveMsg.textContent=d.message;saveMsg.className=d.success?'save-msg':'save-msg err';
+    }catch(e){saveMsg.textContent='Save failed: '+e.message;saveMsg.className='save-msg err';}
+  });
+
+  // Tabs
+  function renderTabs(){
+    tabsBar.querySelectorAll('.tab').forEach(t=>t.remove());
+    sessions.forEach(s=>{
+      const tab=document.createElement('div');tab.className='tab'+(s.id===activeId?' active':'');
+      const lbl=document.createElement('span');lbl.className='tab-label';lbl.textContent=s.label;lbl.title=s.label;tab.appendChild(lbl);
+      const cl=document.createElement('button');cl.className='tab-close';cl.textContent='×';cl.addEventListener('click',e=>{e.stopPropagation();closeS(s.id);});tab.appendChild(cl);
+      tab.addEventListener('click',()=>switchS(s.id));tabsBar.insertBefore(tab,newTabBtn);
+    });
+  }
+  function switchS(id){if(streaming||id===activeId)return;activeId=id;persist();renderTabs();renderChat();input.focus();}
+  function closeS(id){if(streaming)return;sessions=sessions.filter(s=>s.id!==id);if(!sessions.length)sessions.push(mkS());if(activeId===id)activeId=sessions[sessions.length-1].id;persist();renderTabs();renderChat();}
+  newTabBtn.addEventListener('click',()=>{if(streaming)return;const s=mkS();sessions.push(s);activeId=s.id;persist();renderTabs();renderChat();input.focus();});
+
+  // Chat
+  function renderChat(){
+    chatArea.innerHTML='';const s=cur();
+    if(!s||!s.rendered.length){chatArea.innerHTML='<div class="welcome"><div class="welcome-icon">🩺</div><h2>What\'s the problem?</h2><p>Describe the issue you\'re experiencing. I\'ll diagnose it step by step, asking for permission before reading files, running commands, or making changes.</p></div>';return;}
+    s.rendered.forEach(e=>{
+      const w=document.createElement('div');w.className='message no-anim';
+      const l=document.createElement('div');l.className='message-label'+(e.role==='assistant'?' assistant-label':'');l.textContent=e.role==='user'?'You':'DoctorClaw';
+      const b=document.createElement('div');b.className='message-body '+e.role+'-body';
+      b.innerHTML=fmt((e.content||'').replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'').trim());
+      w.appendChild(l);w.appendChild(b);chatArea.appendChild(w);
+      if(e.actions)e.actions.forEach(a=>restoreAct(a,w));
+    });scrollDown();
+  }
+
+  function restoreAct(act,after){
+    const card=document.createElement('div');card.className='action-card no-anim';
+    const bc=actBadge(act.type);
+    const tl=actLabel(act.type);
+    let h='<div class="action-header"><span class="action-type-badge '+bc+'">'+tl+'</span><span class="action-target" title="'+esc(act.target)+'">'+esc(act.target)+'</span></div><div class="action-body">';
+    if(act.content)h+='<div class="action-content-preview">'+esc(act.content)+'</div>';
+    if(act.status==='pending')h+='<div class="action-buttons"><button class="btn btn-approve" data-action="approve">✓ Approve</button><button class="btn btn-deny" data-action="deny">✕ Deny</button></div>';
+    else if(act.status==='approved')h+='<div class="action-buttons"><button class="btn btn-approve" disabled>✓ Approved</button></div>';
+    else h+='<div class="action-buttons"><button class="btn btn-deny" disabled>✕ Denied</button></div>';
+    h+='<div class="action-result-container">';
+    if(act.result){const c=act.status==='denied'?'denied':(act.resultSuccess?'success':'failure');h+='<div class="action-result '+c+'">'+esc(act.result)+'</div>';}
+    h+='</div></div>';card.innerHTML=h;after.after(card);
+    if(act.status==='pending')wireAct(card,act);
+  }
+
+  function wireAct(card,act){
+    const ab=card.querySelector('[data-action="approve"]'),db=card.querySelector('[data-action="deny"]'),rc=card.querySelector('.action-result-container');
+    ab.addEventListener('click',async()=>{
+      ab.disabled=true;db.disabled=true;ab.textContent='Running…';
+      try{
+        const res=await fetch('/api/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:act.type,target:act.target,content:act.content})});
+        const data=await res.json();act.status='approved';act.result=data.result;act.resultSuccess=data.success;persist();
+        const r=document.createElement('div');r.className='action-result '+(data.success?'success':'failure');r.textContent=data.result;rc.appendChild(r);ab.textContent='✓ Approved';
+        cur().conversation.push({role:'user',content:'[Result of '+act.type+' on "'+act.target+'"]: '+(data.success?'SUCCESS':'FAILED')+'\n'+data.result});persist();
+        streaming=true;sendBtn.disabled=true;await streamResp();streaming=false;sendBtn.disabled=false;
+      }catch(err){const r=document.createElement('div');r.className='action-result failure';r.textContent='Error: '+err.message;rc.appendChild(r);ab.textContent='✓ Approve';ab.disabled=false;db.disabled=false;}
+      scrollDown();
+    });
+    db.addEventListener('click',()=>{
+      ab.disabled=true;db.disabled=true;db.textContent='✕ Denied';act.status='denied';act.result='Action denied by user.';persist();
+      const r=document.createElement('div');r.className='action-result denied';r.textContent='Action denied by user.';rc.appendChild(r);
+      cur().conversation.push({role:'user',content:'[User DENIED the action: '+act.type+' on "'+act.target+'"]'});persist();scrollDown();
+    });
+  }
+
+  function fmt(t){let h=esc(t);h=h.replace(/```(\w*)\n([\s\S]*?)```/g,'<pre><code>$2</code></pre>');h=h.replace(/`([^`]+)`/g,'<code>$1</code>');h=h.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');return h;}
+  function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+  function scrollDown(){requestAnimationFrame(()=>{chatArea.scrollTop=chatArea.scrollHeight;});}
+  function actBadge(t){return t==='READ_FILE'?'read':t==='RUN_CMD'?'cmd':t==='RUN_SCRIPT'?'script':'write';}
+  function actLabel(t){return t==='READ_FILE'?'Read File':t==='RUN_CMD'?'Run Command':t==='RUN_SCRIPT'?'Run Script':'Write File';}
+  const ACT_RE_STRIP=/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g;
+
+  input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,160)+'px';});
+  input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();}});
+  sendBtn.addEventListener('click',sendMsg);
+
+  async function sendMsg(){
+    const text=input.value.trim();if(!text||streaming)return;const s=cur();
+    if(!s.conversation.length){s.label=text.length>30?text.slice(0,30)+'…':text;renderTabs();}
+    s.conversation.push({role:'user',content:text});s.rendered.push({role:'user',content:text});persist();
+    input.value='';input.style.height='auto';renderChat();
+    streaming=true;sendBtn.disabled=true;await streamResp();streaming=false;sendBtn.disabled=false;input.focus();
+  }
+
+  async function streamResp(){
+    const s=cur();const w=document.createElement('div');w.className='message';
+    const l=document.createElement('div');l.className='message-label assistant-label';l.textContent='DoctorClaw';
+    const b=document.createElement('div');b.className='message-body assistant-body';
+    const dot=document.createElement('span');dot.className='streaming-dot';b.appendChild(dot);
+    w.appendChild(l);w.appendChild(b);chatArea.appendChild(w);scrollDown();
+    let full='';
+    try{
+      const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:s.conversation})});
+      if(!res.ok){const err=await res.json();b.innerHTML=fmt('Error: '+(err.detail||err.error));s.rendered.push({role:'assistant',content:'Error: '+(err.detail||err.error)});persist();return;}
+      const reader=res.body.getReader();const dec=new TextDecoder();let buf='';
+      while(true){const{done,value}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop()||'';
+        for(const line of lines){if(line.startsWith('data: ')){const p=line.slice(6).trim();if(p==='[DONE]')continue;try{const j=JSON.parse(p);if(j.message?.content){full+=j.message.content;b.innerHTML=fmt(full.replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'').trim());scrollDown();}}catch{}}}}
+    }catch(e){full+='\n\n[Connection error: '+e.message+']';}
+    if(dot.parentNode)dot.remove();
+    b.innerHTML=fmt(full.replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'').trim());
+    s.conversation.push({role:'assistant',content:full});
+    const entry={role:'assistant',content:full,actions:[]};
+    const RE=/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]+)\]/g;let m;
+    while((m=RE.exec(full))!==null){
+      const type=m[1];let target,content;
+      if(type==='WRITE_FILE'||type==='RUN_SCRIPT'){const ci=m[2].indexOf(':');if(ci>-1){target=m[2].slice(0,ci);content=m[2].slice(ci+1);}else{target=m[2];content=null;}}else{target=m[2];content=null;}
+      const act={type,target,content,status:'pending',result:null,resultSuccess:null};entry.actions.push(act);
+      const card=document.createElement('div');card.className='action-card';
+      const bc=actBadge(type);
+      const tl=actLabel(type);
+      let ch='<div class="action-header"><span class="action-type-badge '+bc+'">'+tl+'</span><span class="action-target" title="'+esc(target)+'">'+esc(target)+'</span></div><div class="action-body">';
+      if(content)ch+='<div class="action-content-preview">'+esc(content)+'</div>';
+      ch+='<div class="action-buttons"><button class="btn btn-approve" data-action="approve">✓ Approve</button><button class="btn btn-deny" data-action="deny">✕ Deny</button></div><div class="action-result-container"></div></div>';
+      card.innerHTML=ch;w.after(card);wireAct(card,act);
+    }
+    s.rendered.push(entry);persist();scrollDown();
+  }
+
+  renderTabs();renderChat();input.focus();
+})();
+</script>
+</body>
+</html>
