@@ -157,6 +157,47 @@
   .edit-actions .btn { padding: 6px 16px; font-size: 12.5px; }
   .branch-notice { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; font-style: italic; }
 
+  /* ── Settings Tabs ── */
+  .settings-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border-subtle); margin-bottom: 16px; }
+  .settings-tab { padding: 10px 20px; font-family: var(--font-body); font-size: 13px; font-weight: 500; color: var(--text-tertiary); background: transparent; border: none; border-bottom: 2px solid transparent; cursor: pointer; transition: all var(--transition); }
+  .settings-tab:hover { color: var(--text-secondary); }
+  .settings-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .settings-tab-content { display: none; }
+  .settings-tab-content.active { display: block; }
+
+  /* ── Toggle Switch ── */
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
+  .toggle-label-group { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+  .toggle-switch { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
+  .toggle-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .toggle-slider { position: absolute; inset: 0; background: var(--border); border-radius: 12px; cursor: pointer; transition: all var(--transition); }
+  .toggle-slider::before { content: ''; position: absolute; width: 18px; height: 18px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: all var(--transition); }
+  .toggle-switch input:checked + .toggle-slider { background: var(--accent); }
+  .toggle-switch input:checked + .toggle-slider::before { transform: translateX(20px); }
+
+  /* ── Audio / Mic Button ── */
+  .btn-audio { width: 46px; height: 46px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; display: none; align-items: center; justify-content: center; transition: all var(--transition); flex-shrink: 0; }
+  .btn-audio.visible { display: flex; }
+  .btn-audio:hover { background: var(--bg-surface-hover); border-color: var(--text-tertiary); }
+  .btn-audio.recording { background: var(--danger-subtle); border-color: var(--danger); color: var(--danger); }
+  .btn-audio.recording:hover { background: var(--danger-subtle); border-color: var(--danger-hover); }
+  .btn-audio svg { width: 20px; height: 20px; }
+  @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(199,74,74,0.4); } 70% { box-shadow: 0 0 0 8px rgba(199,74,74,0); } 100% { box-shadow: 0 0 0 0 rgba(199,74,74,0); } }
+  .btn-audio.recording { animation: pulse-ring 1.5s ease-in-out infinite; }
+
+  /* ── TTS Speaking Indicator ── */
+  .tts-indicator { display: none; align-items: center; gap: 6px; font-size: 11px; color: var(--accent); padding: 4px 0; }
+  .tts-indicator.active { display: flex; }
+  .tts-bars { display: flex; gap: 2px; align-items: flex-end; height: 14px; }
+  .tts-bar { width: 3px; background: var(--accent); border-radius: 1px; animation: tts-eq 0.8s ease-in-out infinite; }
+  .tts-bar:nth-child(1) { height: 6px; animation-delay: 0s; }
+  .tts-bar:nth-child(2) { height: 10px; animation-delay: 0.15s; }
+  .tts-bar:nth-child(3) { height: 4px; animation-delay: 0.3s; }
+  .tts-bar:nth-child(4) { height: 12px; animation-delay: 0.45s; }
+  @keyframes tts-eq { 0%, 100% { transform: scaleY(0.4); } 50% { transform: scaleY(1); } }
+  .tts-stop { background: none; border: none; color: var(--text-tertiary); cursor: pointer; font-size: 11px; font-family: var(--font-body); text-decoration: underline; padding: 0; transition: color var(--transition); }
+  .tts-stop:hover { color: var(--danger); }
+
   @media (max-width: 640px) {
     .header { padding: 12px 16px; } .tabs-bar { padding: 8px 16px 0; } .chat-area { padding: 16px; } .input-area { padding: 12px 16px 20px; }
     .brand-text span { display: none; } .tab { max-width: 130px; padding: 7px 10px; }
@@ -191,6 +232,11 @@
   <div class="input-area">
     <div class="input-wrapper">
       <textarea class="input-field" id="input" placeholder="Describe the issue…" rows="1"></textarea>
+      <button class="btn-audio" id="audioBtn" title="Voice input">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      </button>
       <button class="btn-send" id="sendBtn" title="Send">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
@@ -198,6 +244,11 @@
       </button>
     </div>
     <div class="input-hint">Actions require your explicit approval before execution</div>
+    <div class="tts-indicator" id="ttsIndicator">
+      <div class="tts-bars"><div class="tts-bar"></div><div class="tts-bar"></div><div class="tts-bar"></div><div class="tts-bar"></div></div>
+      <span>Speaking…</span>
+      <button class="tts-stop" id="ttsStopBtn">Stop</button>
+    </div>
   </div>
 </div>
 
@@ -206,44 +257,74 @@
   <div class="settings-panel">
     <div class="settings-header"><h2>Settings</h2><button class="settings-close" id="settingsClose">×</button></div>
     <div class="settings-body">
-      <div class="field">
-        <label class="field-label">Ollama URL</label>
-        <input class="field-input" id="cfgOllamaUrl" type="text" placeholder="http://localhost:11434">
+      <div class="settings-tabs">
+        <button class="settings-tab active" data-settings-tab="general">General</button>
+        <button class="settings-tab" data-settings-tab="experimental">Experimental</button>
       </div>
-      <div class="field">
-        <label class="field-label">Model</label>
-        <input class="field-input" id="cfgModel" type="text" placeholder="glm-4.7:cloud">
+      <div class="settings-tab-content active" id="settingsGeneral">
+        <div class="field">
+          <label class="field-label">Ollama URL</label>
+          <input class="field-input" id="cfgOllamaUrl" type="text" placeholder="http://localhost:11434">
+        </div>
+        <div class="field">
+          <label class="field-label">Model</label>
+          <input class="field-input" id="cfgModel" type="text" placeholder="glm-4.7:cloud">
+        </div>
+        <div class="field">
+          <label class="field-label">Port</label>
+          <div class="field-hint">Requires restart to take effect.</div>
+          <input class="field-input" id="cfgPort" type="number" placeholder="3333">
+        </div>
+        <div class="field">
+          <label class="field-label">OpenClaw Directory</label>
+          <div class="field-hint">Main directory of your OpenClaw installation. Automatically included in read and write paths.</div>
+          <input class="field-input" id="cfgOpenclawDir" type="text" placeholder="/opt/openclaw">
+        </div>
+        <div class="field">
+          <label class="field-label">Operating System</label>
+          <div class="field-hint">Tells DoctorClaw which commands and shell syntax to use.</div>
+          <select class="field-input" id="cfgOs">
+            <option value="linux">Linux</option>
+            <option value="macos">macOS</option>
+            <option value="windows">Windows</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label">Readable Paths</label>
+          <div class="field-hint">Directories DoctorClaw is allowed to read from. Changes take effect immediately.</div>
+          <div class="path-list" id="readPathsList"></div>
+          <button class="path-add" id="addReadPath">+ Add path</button>
+        </div>
+        <div class="field">
+          <label class="field-label">Writable Paths</label>
+          <div class="field-hint">Directories DoctorClaw is allowed to write to. Changes take effect immediately.</div>
+          <div class="path-list" id="writePathsList"></div>
+          <button class="path-add" id="addWritePath">+ Add path</button>
+        </div>
       </div>
-      <div class="field">
-        <label class="field-label">Port</label>
-        <div class="field-hint">Requires restart to take effect.</div>
-        <input class="field-input" id="cfgPort" type="number" placeholder="3333">
-      </div>
-      <div class="field">
-        <label class="field-label">OpenClaw Directory</label>
-        <div class="field-hint">Main directory of your OpenClaw installation. Automatically included in read and write paths.</div>
-        <input class="field-input" id="cfgOpenclawDir" type="text" placeholder="/opt/openclaw">
-      </div>
-      <div class="field">
-        <label class="field-label">Operating System</label>
-        <div class="field-hint">Tells DoctorClaw which commands and shell syntax to use.</div>
-        <select class="field-input" id="cfgOs">
-          <option value="linux">Linux</option>
-          <option value="macos">macOS</option>
-          <option value="windows">Windows</option>
-        </select>
-      </div>
-      <div class="field">
-        <label class="field-label">Readable Paths</label>
-        <div class="field-hint">Directories DoctorClaw is allowed to read from. Changes take effect immediately.</div>
-        <div class="path-list" id="readPathsList"></div>
-        <button class="path-add" id="addReadPath">+ Add path</button>
-      </div>
-      <div class="field">
-        <label class="field-label">Writable Paths</label>
-        <div class="field-hint">Directories DoctorClaw is allowed to write to. Changes take effect immediately.</div>
-        <div class="path-list" id="writePathsList"></div>
-        <button class="path-add" id="addWritePath">+ Add path</button>
+      <div class="settings-tab-content" id="settingsExperimental">
+        <div class="field">
+          <div class="toggle-row">
+            <div class="toggle-label-group">
+              <label class="field-label" style="margin-bottom:0">Enable Audio Conversing</label>
+              <div class="field-hint" style="margin-bottom:0">Talk to DoctorClaw using your microphone and hear responses spoken aloud via ElevenLabs.</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="cfgAudioEnabled">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">ElevenLabs API Key</label>
+          <div class="field-hint">Required for text-to-speech. Get your key at <a href="https://elevenlabs.io" target="_blank" style="color:var(--accent)">elevenlabs.io</a>.</div>
+          <input class="field-input" id="cfgElevenlabsKey" type="password" placeholder="xi-xxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+        </div>
+        <div class="field">
+          <label class="field-label">ElevenLabs Voice ID</label>
+          <div class="field-hint">The voice to use for speech. Leave blank for the default voice (Rachel).</div>
+          <input class="field-input" id="cfgElevenlabsVoice" type="text" placeholder="21m00Tcm4TlvDq8ikWAM">
+        </div>
       </div>
     </div>
     <div class="settings-footer">
@@ -255,12 +336,13 @@
 
 <script>
 (function() {
-  const SK='doctorclaw-sessions', AK='doctorclaw-active-session';
+  const SK='doctorclaw-sessions', AK='doctorclaw-active-session', AUDIO_KEY='doctorclaw-audio-enabled';
   function loadS(){try{return JSON.parse(localStorage.getItem(SK))||[];}catch{return[];}}
   function saveS(s){localStorage.setItem(SK,JSON.stringify(s));}
   function gAI(){return localStorage.getItem(AK);}
   function sAI(id){localStorage.setItem(AK,id);}
   let sessions=loadS(),activeId=gAI(),streaming=false,abortController=null;
+  let audioEnabled=localStorage.getItem(AUDIO_KEY)==='true';
   const SEND_ICON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
   const STOP_ICON='<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
   if(!sessions.length){const s=mkS();sessions.push(s);activeId=s.id;persist();}
@@ -290,7 +372,8 @@
 
   const chatArea=document.getElementById('chatArea'),input=document.getElementById('input'),sendBtn=document.getElementById('sendBtn'),
     tabsBar=document.getElementById('tabsBar'),newTabBtn=document.getElementById('newTabBtn'),themeToggle=document.getElementById('themeToggle'),
-    statusDot=document.getElementById('statusDot'),statusLabel=document.getElementById('statusLabel');
+    statusDot=document.getElementById('statusDot'),statusLabel=document.getElementById('statusLabel'),
+    audioBtn=document.getElementById('audioBtn'),ttsIndicator=document.getElementById('ttsIndicator'),ttsStopBtn=document.getElementById('ttsStopBtn');
 
   // Theme
   const st=localStorage.getItem('dc-theme')||'light';document.documentElement.setAttribute('data-theme',st);updTI();
@@ -306,8 +389,24 @@
   sBtn.addEventListener('click',openSettings);sClose.addEventListener('click',()=>sOverlay.classList.remove('open'));
   sOverlay.addEventListener('click',e=>{if(e.target===sOverlay)sOverlay.classList.remove('open');});
 
+  // Settings tabs
+  document.querySelectorAll('.settings-tab').forEach(tab=>{
+    tab.addEventListener('click',()=>{
+      document.querySelectorAll('.settings-tab').forEach(t=>t.classList.remove('active'));
+      document.querySelectorAll('.settings-tab-content').forEach(c=>c.classList.remove('active'));
+      tab.classList.add('active');
+      const target=tab.getAttribute('data-settings-tab');
+      document.getElementById(target==='general'?'settingsGeneral':'settingsExperimental').classList.add('active');
+    });
+  });
+
   async function openSettings(){
     saveMsg.textContent='';
+    // Reset to General tab
+    document.querySelectorAll('.settings-tab').forEach(t=>t.classList.remove('active'));
+    document.querySelectorAll('.settings-tab-content').forEach(c=>c.classList.remove('active'));
+    document.querySelector('[data-settings-tab="general"]').classList.add('active');
+    document.getElementById('settingsGeneral').classList.add('active');
     try{
       const r=await fetch('/api/config');const cfg=await r.json();
       document.getElementById('cfgOllamaUrl').value=cfg.ollama_url||'';
@@ -317,6 +416,10 @@
       document.getElementById('cfgOs').value=cfg.os||'linux';
       renderPL('readPathsList',cfg.read_paths||[]);
       renderPL('writePathsList',cfg.write_paths||[]);
+      // Experimental fields
+      document.getElementById('cfgAudioEnabled').checked=!!cfg.audio_enabled;
+      document.getElementById('cfgElevenlabsKey').value=cfg.elevenlabs_api_key||'';
+      document.getElementById('cfgElevenlabsVoice').value=cfg.elevenlabs_voice_id||'';
     }catch{saveMsg.textContent='Could not load config.';saveMsg.className='save-msg err';}
     sOverlay.classList.add('open');
   }
@@ -341,9 +444,24 @@
   saveBtn.addEventListener('click',async()=>{
     saveMsg.textContent='Saving…';saveMsg.className='save-msg';
     try{
-      const body={ollama_url:document.getElementById('cfgOllamaUrl').value.trim(),model:document.getElementById('cfgModel').value.trim(),port:document.getElementById('cfgPort').value.trim(),openclaw_dir:document.getElementById('cfgOpenclawDir').value.trim(),os:document.getElementById('cfgOs').value,read_paths:gatherPaths('readPathsList'),write_paths:gatherPaths('writePathsList')};
+      const body={
+        ollama_url:document.getElementById('cfgOllamaUrl').value.trim(),
+        model:document.getElementById('cfgModel').value.trim(),
+        port:document.getElementById('cfgPort').value.trim(),
+        openclaw_dir:document.getElementById('cfgOpenclawDir').value.trim(),
+        os:document.getElementById('cfgOs').value,
+        read_paths:gatherPaths('readPathsList'),
+        write_paths:gatherPaths('writePathsList'),
+        audio_enabled:document.getElementById('cfgAudioEnabled').checked,
+        elevenlabs_api_key:document.getElementById('cfgElevenlabsKey').value.trim(),
+        elevenlabs_voice_id:document.getElementById('cfgElevenlabsVoice').value.trim(),
+      };
       const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       const d=await r.json();saveMsg.textContent=d.message;saveMsg.className=d.success?'save-msg':'save-msg err';
+      // Update audio state
+      audioEnabled=body.audio_enabled;
+      localStorage.setItem(AUDIO_KEY,audioEnabled?'true':'false');
+      updateAudioBtnVisibility();
     }catch(e){saveMsg.textContent='Save failed: '+e.message;saveMsg.className='save-msg err';}
   });
 
@@ -478,6 +596,11 @@
       }
     }
     s.rendered.push(entry);persist();scrollDown();
+    // Trigger TTS if audio is enabled and response wasn't aborted
+    if(audioEnabled&&!aborted&&full.trim()){
+      const ttsChunks=parseResponseForTTS(full);
+      if(ttsChunks.length) queueTTS(ttsChunks);
+    }
   }
 
   function setSendBtnStreaming(on){
@@ -528,6 +651,164 @@
     streaming=true;setSendBtnStreaming(true);try{await streamResp();}finally{streaming=false;setSendBtnStreaming(false);}input.focus();
   }
 
+  // ── Audio Feature: Speech-to-Text & Text-to-Speech ──
+
+  const MIC_ICON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
+  const STOP_MIC_ICON='<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+
+  let recognition=null, isRecording=false, sttFinalText='', sttBaseText='';
+
+  function updateAudioBtnVisibility(){
+    if(audioEnabled) audioBtn.classList.add('visible');
+    else { audioBtn.classList.remove('visible'); if(isRecording) stopRecording(); }
+  }
+
+  function initSpeechRecognition(){
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR) return;
+    recognition=new SR();
+    recognition.continuous=true;
+    recognition.interimResults=true;
+    recognition.lang='en-US';
+    recognition.onresult=e=>{
+      let finalChunk='', interim='';
+      for(let i=e.resultIndex;i<e.results.length;i++){
+        const t=e.results[i][0].transcript;
+        if(e.results[i].isFinal) finalChunk+=t;
+        else interim+=t;
+      }
+      sttFinalText+=finalChunk;
+      const sep=(sttBaseText&&(sttFinalText||interim))?' ':'';
+      input.value=sttBaseText+sep+sttFinalText+interim;
+      input.style.height='auto';
+      input.style.height=Math.min(input.scrollHeight,160)+'px';
+    };
+    recognition.onerror=e=>{
+      if(e.error==='not-allowed'||e.error==='service-not-allowed'){
+        stopRecording();
+      }
+    };
+    recognition.onend=()=>{
+      if(isRecording){try{recognition.start();}catch{stopRecording();}}
+    };
+  }
+
+  function startRecording(){
+    if(!recognition) initSpeechRecognition();
+    if(!recognition) return;
+    sttBaseText=input.value;
+    sttFinalText='';
+    isRecording=true;
+    audioBtn.innerHTML=STOP_MIC_ICON;
+    audioBtn.classList.add('recording');
+    audioBtn.title='Stop listening';
+    try{recognition.start();}catch{stopRecording();}
+  }
+
+  function stopRecording(){
+    isRecording=false;
+    if(recognition) try{recognition.stop();}catch{}
+    audioBtn.innerHTML=MIC_ICON;
+    audioBtn.classList.remove('recording');
+    audioBtn.title='Voice input';
+    // Commit final text
+    if(sttFinalText){
+      const sep=sttBaseText?' ':'';
+      input.value=sttBaseText+sep+sttFinalText;
+    }
+    sttFinalText='';sttBaseText='';
+    input.style.height='auto';
+    input.style.height=Math.min(input.scrollHeight,160)+'px';
+  }
+
+  audioBtn.addEventListener('click',()=>{
+    if(isRecording) stopRecording();
+    else startRecording();
+  });
+
+  // ── Text-to-Speech via ElevenLabs ──
+
+  let ttsQueue=[], ttsPlaying=false, currentAudio=null;
+
+  function showTTSIndicator(on){
+    if(on) ttsIndicator.classList.add('active');
+    else ttsIndicator.classList.remove('active');
+  }
+
+  async function playNextTTS(){
+    if(!ttsQueue.length){ttsPlaying=false;showTTSIndicator(false);return;}
+    ttsPlaying=true;showTTSIndicator(true);
+    const text=ttsQueue.shift();
+    try{
+      const resp=await fetch('/api/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+      if(!resp.ok){playNextTTS();return;}
+      const blob=await resp.blob();
+      const url=URL.createObjectURL(blob);
+      currentAudio=new Audio(url);
+      currentAudio.onended=()=>{URL.revokeObjectURL(url);currentAudio=null;playNextTTS();};
+      currentAudio.onerror=()=>{URL.revokeObjectURL(url);currentAudio=null;playNextTTS();};
+      currentAudio.play().catch(()=>{URL.revokeObjectURL(url);currentAudio=null;playNextTTS();});
+    }catch{currentAudio=null;playNextTTS();}
+  }
+
+  function queueTTS(chunks){
+    ttsQueue.push(...chunks);
+    if(!ttsPlaying) playNextTTS();
+  }
+
+  function stopTTS(){
+    ttsQueue=[];
+    if(currentAudio){try{currentAudio.pause();}catch{}currentAudio=null;}
+    ttsPlaying=false;showTTSIndicator(false);
+  }
+
+  ttsStopBtn.addEventListener('click',stopTTS);
+
+  function parseResponseForTTS(text){
+    // Remove action markers
+    text=text.replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'').trim();
+    if(!text) return [];
+    const chunks=[];
+    // Split around code blocks
+    const parts=text.split(/(```[\s\S]*?```)/g);
+    let consecutiveCodeBlocks=0;
+    for(let i=0;i<parts.length;i++){
+      const part=parts[i].trim();
+      if(!part) continue;
+      if(part.startsWith('```')){
+        consecutiveCodeBlocks++;
+      } else {
+        // Flush code block announcement
+        if(consecutiveCodeBlocks>0){
+          chunks.push(consecutiveCodeBlocks===1?'See code block.':'See code blocks.');
+          consecutiveCodeBlocks=0;
+        }
+        // Split into paragraph-sized chunks on double newlines
+        const paragraphs=part.split(/\n\n+/);
+        for(const p of paragraphs){
+          const cleaned=p.replace(/\n/g,' ').trim();
+          if(cleaned) chunks.push(cleaned);
+        }
+      }
+    }
+    // Handle trailing code blocks
+    if(consecutiveCodeBlocks>0){
+      chunks.push(consecutiveCodeBlocks===1?'See code block.':'See code blocks.');
+    }
+    return chunks;
+  }
+
+  // Fetch audio config on page load
+  (async function loadAudioState(){
+    try{
+      const r=await fetch('/api/config');const cfg=await r.json();
+      audioEnabled=!!cfg.audio_enabled;
+      localStorage.setItem(AUDIO_KEY,audioEnabled?'true':'false');
+      updateAudioBtnVisibility();
+    }catch{/* keep localStorage value */}
+  })();
+
+  updateAudioBtnVisibility();
   renderTabs();renderChat();input.focus();
 })();
 </script>

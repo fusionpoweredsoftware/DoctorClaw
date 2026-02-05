@@ -474,6 +474,8 @@ app.get('/', (_req, res) => {
 // ── Config API ──────────────────────────────────────────────────────────────
 
 app.get('/api/config', (_req, res) => {
+  let current = {};
+  try { current = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')); } catch {}
   res.json({
     port: PORT,
     ollama_url: OLLAMA_URL,
@@ -482,6 +484,9 @@ app.get('/api/config', (_req, res) => {
     os: OS_TYPE,
     read_paths: SAFE_READ_PATHS,
     write_paths: SAFE_WRITE_PATHS,
+    audio_enabled: !!current.audio_enabled,
+    elevenlabs_api_key: current.elevenlabs_api_key || '',
+    elevenlabs_voice_id: current.elevenlabs_voice_id || '',
   });
 });
 
@@ -498,6 +503,9 @@ app.post('/api/config', (req, res) => {
     if (updates.os !== undefined) current.os = updates.os;
     if (updates.read_paths !== undefined) current.read_paths = updates.read_paths;
     if (updates.write_paths !== undefined) current.write_paths = updates.write_paths;
+    if (updates.audio_enabled !== undefined) current.audio_enabled = !!updates.audio_enabled;
+    if (updates.elevenlabs_api_key !== undefined) current.elevenlabs_api_key = updates.elevenlabs_api_key;
+    if (updates.elevenlabs_voice_id !== undefined) current.elevenlabs_voice_id = updates.elevenlabs_voice_id;
 
     writeFileSync(CONFIG_PATH, JSON.stringify(current, null, 2) + '\n', 'utf-8');
 
@@ -529,6 +537,53 @@ app.get('/api/health', async (_req, res) => {
     }
   } catch {
     res.json({ status: 'error', message: 'Cannot reach Ollama at ' + OLLAMA_URL });
+  }
+});
+
+// ── ElevenLabs TTS Proxy ─────────────────────────────────────────────────────
+
+app.post('/api/tts', async (req, res) => {
+  const { text } = req.body;
+  if (!text || !text.trim()) {
+    return res.status(400).json({ error: 'No text provided' });
+  }
+
+  let current = {};
+  try { current = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')); } catch {}
+
+  const apiKey = current.elevenlabs_api_key;
+  const voiceId = current.elevenlabs_voice_id || '21m00Tcm4TlvDq8ikWAM';
+
+  if (!apiKey) {
+    return res.status(400).json({ error: 'ElevenLabs API key not configured' });
+  }
+
+  try {
+    const ttsResp = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
+      method: 'POST',
+      headers: {
+        'xi-api-key': apiKey,
+        'Content-Type': 'application/json',
+        'Accept': 'audio/mpeg',
+      },
+      body: JSON.stringify({
+        text: text.trim(),
+        model_id: 'eleven_monolingual_v1',
+        voice_settings: { stability: 0.5, similarity_boost: 0.5 },
+      }),
+    });
+
+    if (!ttsResp.ok) {
+      const errText = await ttsResp.text();
+      return res.status(ttsResp.status).json({ error: errText });
+    }
+
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Cache-Control', 'no-cache');
+    const buffer = await ttsResp.arrayBuffer();
+    res.send(Buffer.from(buffer));
+  } catch (err) {
+    res.status(500).json({ error: 'TTS request failed: ' + err.message });
   }
 });
 
