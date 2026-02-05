@@ -757,7 +757,7 @@
 
   // ── Text-to-Speech via ElevenLabs ──
 
-  let ttsQueue=[], ttsPlaying=false, currentAudio=null;
+  let ttsPromises=[], ttsPlaying=false, currentAudio=null, ttsAborted=false;
 
   function showTTSIndicator(on){
     if(on) ttsIndicator.classList.add('active');
@@ -765,28 +765,35 @@
   }
 
   async function playNextTTS(){
-    if(!ttsQueue.length){ttsPlaying=false;showTTSIndicator(false);return;}
+    if(!ttsPromises.length||ttsAborted){
+      ttsPromises=[];ttsPlaying=false;ttsAborted=false;showTTSIndicator(false);return;
+    }
     ttsPlaying=true;showTTSIndicator(true);
-    const text=ttsQueue.shift();
-    try{
-      const resp=await fetch('/api/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
-      if(!resp.ok){playNextTTS();return;}
-      const blob=await resp.blob();
-      const url=URL.createObjectURL(blob);
-      currentAudio=new Audio(url);
-      currentAudio.onended=()=>{URL.revokeObjectURL(url);currentAudio=null;playNextTTS();};
-      currentAudio.onerror=()=>{URL.revokeObjectURL(url);currentAudio=null;playNextTTS();};
-      currentAudio.play().catch(()=>{URL.revokeObjectURL(url);currentAudio=null;playNextTTS();});
-    }catch{currentAudio=null;playNextTTS();}
+    const blobPromise=ttsPromises.shift();
+    const blob=await blobPromise;
+    if(ttsAborted){ttsPromises=[];ttsPlaying=false;ttsAborted=false;showTTSIndicator(false);return;}
+    if(!blob){playNextTTS();return;}
+    const url=URL.createObjectURL(blob);
+    currentAudio=new Audio(url);
+    currentAudio.onended=()=>{URL.revokeObjectURL(url);currentAudio=null;playNextTTS();};
+    currentAudio.onerror=()=>{URL.revokeObjectURL(url);currentAudio=null;playNextTTS();};
+    currentAudio.play().catch(()=>{URL.revokeObjectURL(url);currentAudio=null;playNextTTS();});
   }
 
   function queueTTS(chunks){
-    ttsQueue.push(...chunks);
+    ttsAborted=false;
+    // Fire ALL fetches in parallel so audio is pre-generated while earlier chunks play
+    const promises=chunks.map(text=>
+      fetch('/api/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})})
+      .then(r=>r.ok?r.blob():null).catch(()=>null)
+    );
+    ttsPromises.push(...promises);
     if(!ttsPlaying) playNextTTS();
   }
 
   function stopTTS(){
-    ttsQueue=[];
+    ttsAborted=true;
+    ttsPromises=[];
     if(currentAudio){try{currentAudio.pause();}catch{}currentAudio=null;}
     ttsPlaying=false;showTTSIndicator(false);
   }
