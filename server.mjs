@@ -47,6 +47,38 @@ async function detectModels(ollamaUrl) {
 }
 
 /**
+ * Check if a directory looks like an OpenClaw installation.
+ * A directory qualifies if it has "openclaw" in its path OR contains
+ * recognizable OpenClaw files (configs, binaries, etc.).
+ */
+function looksLikeOpenclawDir(dir) {
+  if (!existsSync(dir)) return false;
+  // Path itself contains "openclaw" (case-insensitive)
+  if (/openclaw/i.test(dir)) return true;
+  // Contains known OpenClaw config or binary files
+  const markers = [
+    'config.yml', 'config.yaml', 'openclaw.yml', 'openclaw.conf',
+    'gateway.yml', 'gateway.conf', 'openclaw-gateway',
+    'bin/openclaw-gateway', 'bin/openclaw',
+  ];
+  return markers.some(m => existsSync(join(dir, m)));
+}
+
+/**
+ * Given an absolute binary path, walk up directories to find the
+ * OpenClaw install root. E.g. /opt/openclaw/bin/openclaw-gateway → /opt/openclaw
+ */
+function findInstallRoot(binPath) {
+  let dir = dirname(binPath);
+  // Walk up at most 4 levels looking for a directory that looks like the install root
+  for (let i = 0; i < 4 && dir !== '/'; i++) {
+    if (looksLikeOpenclawDir(dir)) return dir;
+    dir = dirname(dir);
+  }
+  return null;
+}
+
+/**
  * Auto-detect where OpenClaw is installed by checking common locations,
  * running processes, and PATH lookups.
  */
@@ -73,26 +105,45 @@ function detectOpenclawDir() {
     if (psOutput) {
       const lines = psOutput.split('\n');
       for (const line of lines) {
-        // Extract the command/path from ps output (last field group)
         const parts = line.trim().split(/\s+/);
+        const pid = parts[1];
+
+        // Try /proc/<PID>/exe first — this is the actual binary path, most reliable
+        if (pid && /^\d+$/.test(pid)) {
+          try {
+            const exe = execSync(`readlink /proc/${pid}/exe 2>/dev/null`, {
+              encoding: 'utf-8', timeout: 3000,
+            }).trim();
+            if (exe) {
+              const root = findInstallRoot(exe);
+              if (root) {
+                console.log(`  Auto-detected OpenClaw directory from process exe: ${root}`);
+                return root;
+              }
+            }
+          } catch {}
+        }
+
+        // Try the command path from ps output (field 11+)
         if (parts.length >= 11) {
-          const cmd = parts[10]; // The command path
+          const cmd = parts[10];
           if (cmd.startsWith('/')) {
-            const dir = dirname(cmd);
-            if (existsSync(dir)) {
-              console.log(`  Auto-detected OpenClaw directory from running process: ${dir}`);
-              return dir;
+            const root = findInstallRoot(cmd);
+            if (root) {
+              console.log(`  Auto-detected OpenClaw directory from process command: ${root}`);
+              return root;
             }
           }
         }
-        // Try to get the working directory from /proc/<pid>/cwd
-        const pid = parts[1];
+
+        // Try /proc/<PID>/cwd — but ONLY accept it if it looks like an OpenClaw dir
+        // (not a generic home directory or /)
         if (pid && /^\d+$/.test(pid)) {
           try {
             const cwd = execSync(`readlink /proc/${pid}/cwd 2>/dev/null`, {
               encoding: 'utf-8', timeout: 3000,
             }).trim();
-            if (cwd && existsSync(cwd)) {
+            if (cwd && looksLikeOpenclawDir(cwd)) {
               console.log(`  Auto-detected OpenClaw directory from process cwd: ${cwd}`);
               return cwd;
             }
@@ -108,22 +159,20 @@ function detectOpenclawDir() {
       encoding: 'utf-8', timeout: 3000,
     }).trim();
     if (binPath) {
-      const dir = dirname(binPath);
-      // If it's in a bin/ dir, go up one level (e.g., /opt/openclaw/bin -> /opt/openclaw)
-      const parent = dir.endsWith('/bin') || dir.endsWith('/sbin') ? dirname(dir) : dir;
-      if (existsSync(parent)) {
-        console.log(`  Auto-detected OpenClaw directory from PATH: ${parent}`);
-        return parent;
+      const root = findInstallRoot(binPath);
+      if (root) {
+        console.log(`  Auto-detected OpenClaw directory from PATH: ${root}`);
+        return root;
       }
     }
   } catch {}
 
-  // 4. Check if openclaw files exist under home directories
+  // 4. Check if openclaw directories exist under home directories
   try {
     const homeHits = execSync("find /home -maxdepth 3 -name 'openclaw*' -type d 2>/dev/null | head -1", {
       encoding: 'utf-8', timeout: 5000,
     }).trim();
-    if (homeHits && existsSync(homeHits)) {
+    if (homeHits && looksLikeOpenclawDir(homeHits)) {
       console.log(`  Auto-detected OpenClaw directory under /home: ${homeHits}`);
       return homeHits;
     }
