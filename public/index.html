@@ -560,7 +560,7 @@
     if(streaming) return;
     const text=input.value.trim();
     // If recording with no text yet, queue auto-send and stop recording
-    if(!text&&isRecording){sttAutoSend=true;stopRecording();return;}
+    if(!text&&isRecording){sttAutoSend=true;input.value='';input.placeholder='Transcribing & sending…';input.disabled=true;stopRecording();return;}
     if(!text) return;
     const s=cur();
     // If recording with text already, stop and send immediately
@@ -792,12 +792,15 @@
           input.style.height=Math.min(input.scrollHeight,160)+'px';
           input.focus();
           audioChunks=[];
-          if(sttAutoSend){sttAutoSend=false;sendMsg();}
+          if(sttAutoSend){sttAutoSend=false;input.placeholder='Describe the issue…';input.disabled=false;sendMsg();}
           return;
         }
 
         // Fallback: send full recording to batch STT
-        if(!audioChunks.length) return;
+        if(!audioChunks.length){
+          if(sttAutoSend){sttAutoSend=false;input.placeholder='Describe the issue…';input.disabled=false;}
+          return;
+        }
 
         const mType=mediaRecorder.mimeType||'audio/webm';
         const audioBlob=new Blob(audioChunks,{type:mType});
