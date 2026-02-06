@@ -21,7 +21,8 @@ const DEFAULTS = {
   port: 3333,
   ollama_url: 'http://localhost:11434',
   model: 'glm-4.7:cloud',
-  openclaw_dir: '/opt/openclaw',
+  has_openclaw: false,
+  openclaw_dir: '',
   os: process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux',
   read_paths: ['/etc/', '/var/log/', '/var/lib/', '/tmp/', '/home/', '/opt/', '/usr/local/etc/', '/proc/cpuinfo', '/proc/meminfo', '/proc/loadavg', '/proc/version', '/proc/uptime', '/proc/net/'],
   write_paths: ['/tmp/'],
@@ -337,8 +338,8 @@ function detectOpenclawDir() {
     }
   } catch {}
 
-  // 5. Fallback to default
-  return DEFAULTS.openclaw_dir;
+  // 5. Fallback — nothing found
+  return '/opt/openclaw';
 }
 
 /**
@@ -396,32 +397,39 @@ async function runSetup() {
     if (configExists) {
       const existing = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
       console.log('  Skipping setup (-y flag), using existing config.');
-      // Validate the configured OpenClaw directory
-      const v = validateOpenclawDir(existing.openclaw_dir || DEFAULTS.openclaw_dir);
-      if (!v.exists) {
-        console.log(`  ⚠  Warning: OpenClaw directory "${existing.openclaw_dir || DEFAULTS.openclaw_dir}" does not exist.`);
-        console.log('  Attempting auto-detection...');
-        const detected = detectOpenclawDir();
-        if (detected !== DEFAULTS.openclaw_dir || existsSync(detected)) {
-          console.log(`  → Using detected directory: ${detected}`);
-          existing.openclaw_dir = detected;
-          // Update paths to include the detected directory
-          if (existing.read_paths && !existing.read_paths.includes(detected)) existing.read_paths.push(detected);
-          if (existing.write_paths && !existing.write_paths.includes(detected)) existing.write_paths.push(detected);
-          writeFileSync(CONFIG_PATH, JSON.stringify(existing, null, 2) + '\n', 'utf-8');
-        } else {
-          console.log('  → Could not detect OpenClaw installation. Run with -i to configure manually.');
+      // Only validate OpenClaw directory if user indicated they have it
+      if (existing.has_openclaw !== false && existing.openclaw_dir) {
+        const v = validateOpenclawDir(existing.openclaw_dir);
+        if (!v.exists) {
+          console.log(`  ⚠  Warning: OpenClaw directory "${existing.openclaw_dir}" does not exist.`);
+          console.log('  Attempting auto-detection...');
+          const detected = detectOpenclawDir();
+          if (existsSync(detected)) {
+            console.log(`  → Using detected directory: ${detected}`);
+            existing.openclaw_dir = detected;
+            // Update paths to include the detected directory
+            if (existing.read_paths && !existing.read_paths.includes(detected)) existing.read_paths.push(detected);
+            if (existing.write_paths && !existing.write_paths.includes(detected)) existing.write_paths.push(detected);
+            writeFileSync(CONFIG_PATH, JSON.stringify(existing, null, 2) + '\n', 'utf-8');
+          } else {
+            console.log('  → Could not detect OpenClaw installation. Run with -i to configure manually.');
+          }
         }
       }
       return existing;
     }
     console.log('  Skipping setup (-y flag), detecting OpenClaw location...');
     const detectedDir = detectOpenclawDir();
-    const cfg = { ...DEFAULTS, openclaw_dir: detectedDir, read_paths: [...DEFAULTS.read_paths, detectedDir], write_paths: [...DEFAULTS.write_paths, process.cwd(), detectedDir] };
     const v = validateOpenclawDir(detectedDir);
-    if (!v.exists) {
-      console.log(`  ⚠  Warning: OpenClaw directory "${detectedDir}" does not exist. Run with -i to configure manually.`);
+    const detectedOpenclaw = v.exists;
+    const ocDir = detectedOpenclaw ? detectedDir : '';
+    if (detectedOpenclaw) {
+      console.log(`  Found OpenClaw at: ${detectedDir}`);
+    } else {
+      console.log('  OpenClaw not detected. Skipping OpenClaw configuration.');
+      console.log('  Run with -i to configure manually if you have OpenClaw installed.');
     }
+    const cfg = { ...DEFAULTS, has_openclaw: detectedOpenclaw, openclaw_dir: ocDir, read_paths: [...DEFAULTS.read_paths, ...(ocDir ? [ocDir] : [])], write_paths: [...DEFAULTS.write_paths, process.cwd(), ...(ocDir ? [ocDir] : [])] };
     writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2) + '\n', 'utf-8');
     return cfg;
   }
@@ -429,20 +437,22 @@ async function runSetup() {
   if (!FLAG_INTERACTIVE && configExists) {
     const existing = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
     console.log(`  Loaded config from ${CONFIG_PATH}`);
-    // Validate the configured OpenClaw directory
-    const v = validateOpenclawDir(existing.openclaw_dir || DEFAULTS.openclaw_dir);
-    if (!v.exists) {
-      console.log(`  ⚠  Warning: OpenClaw directory "${existing.openclaw_dir || DEFAULTS.openclaw_dir}" does not exist.`);
-      console.log('  Attempting auto-detection...');
-      const detected = detectOpenclawDir();
-      if (detected !== DEFAULTS.openclaw_dir || existsSync(detected)) {
-        console.log(`  → Using detected directory: ${detected}`);
-        existing.openclaw_dir = detected;
-        if (existing.read_paths && !existing.read_paths.includes(detected)) existing.read_paths.push(detected);
-        if (existing.write_paths && !existing.write_paths.includes(detected)) existing.write_paths.push(detected);
-        writeFileSync(CONFIG_PATH, JSON.stringify(existing, null, 2) + '\n', 'utf-8');
-      } else {
-        console.log('  → Could not detect OpenClaw installation. Run with -i to configure manually.');
+    // Only validate OpenClaw directory if user indicated they have it
+    if (existing.has_openclaw !== false && existing.openclaw_dir) {
+      const v = validateOpenclawDir(existing.openclaw_dir);
+      if (!v.exists) {
+        console.log(`  ⚠  Warning: OpenClaw directory "${existing.openclaw_dir}" does not exist.`);
+        console.log('  Attempting auto-detection...');
+        const detected = detectOpenclawDir();
+        if (existsSync(detected)) {
+          console.log(`  → Using detected directory: ${detected}`);
+          existing.openclaw_dir = detected;
+          if (existing.read_paths && !existing.read_paths.includes(detected)) existing.read_paths.push(detected);
+          if (existing.write_paths && !existing.write_paths.includes(detected)) existing.write_paths.push(detected);
+          writeFileSync(CONFIG_PATH, JSON.stringify(existing, null, 2) + '\n', 'utf-8');
+        } else {
+          console.log('  → Could not detect OpenClaw installation. Run with -i to configure manually.');
+        }
       }
     }
     return existing;
@@ -515,22 +525,34 @@ async function runSetup() {
   console.log('');
   const os = await ask(rl, 'Operating system (linux/macos/windows)', DEFAULTS.os);
 
-  // OpenClaw directory — try auto-detection first
+  // OpenClaw — ask if user has it before trying to detect/configure
   console.log('');
-  console.log('  Detecting OpenClaw installation...');
-  const detectedOcDir = detectOpenclawDir();
-  const detectedValid = validateOpenclawDir(detectedOcDir);
-  if (detectedValid.exists) {
-    console.log(`  Found OpenClaw at: ${detectedOcDir}`);
-    if (detectedValid.configPath) console.log(`  Config file: ${detectedValid.configPath}`);
-    if (detectedValid.logPaths.length) console.log(`  Logs: ${detectedValid.logPaths.join(', ')}`);
+  console.log('  DoctorClaw can help troubleshoot OpenClaw installations,');
+  console.log('  but it also works as a general system diagnostics tool.');
+  const hasOpenclawAnswer = await ask(rl, 'Do you have OpenClaw installed? (y/n)', 'y');
+  const hasOpenclaw = hasOpenclawAnswer.toLowerCase().startsWith('y');
+
+  let openclawDir = '';
+  if (hasOpenclaw) {
+    // OpenClaw directory — try auto-detection first
+    console.log('');
+    console.log('  Detecting OpenClaw installation...');
+    const detectedOcDir = detectOpenclawDir();
+    const detectedValid = validateOpenclawDir(detectedOcDir);
+    if (detectedValid.exists) {
+      console.log(`  Found OpenClaw at: ${detectedOcDir}`);
+      if (detectedValid.configPath) console.log(`  Config file: ${detectedValid.configPath}`);
+      if (detectedValid.logPaths.length) console.log(`  Logs: ${detectedValid.logPaths.join(', ')}`);
+    } else {
+      console.log(`  Could not auto-detect OpenClaw installation.`);
+    }
+    openclawDir = await ask(rl, 'OpenClaw directory', detectedOcDir);
+    const finalValid = openclawDir !== detectedOcDir ? validateOpenclawDir(openclawDir) : detectedValid;
+    if (!finalValid.exists) {
+      console.log(`  ⚠  Warning: "${openclawDir}" does not exist. You can update this later in Settings.`);
+    }
   } else {
-    console.log(`  Could not auto-detect OpenClaw installation.`);
-  }
-  const openclawDir = await ask(rl, 'OpenClaw directory', detectedOcDir);
-  const finalValid = openclawDir !== detectedOcDir ? validateOpenclawDir(openclawDir) : detectedValid;
-  if (!finalValid.exists) {
-    console.log(`  ⚠  Warning: "${openclawDir}" does not exist. You can update this later in Settings.`);
+    console.log('  Skipping OpenClaw configuration. You can enable it later in Settings.');
   }
 
   // Paths
@@ -546,13 +568,14 @@ async function runSetup() {
   rl.close();
 
   // Build config
-  const readPaths = [...DEFAULTS.read_paths, openclawDir, ...extraReadPaths];
-  const writePaths = [...DEFAULTS.write_paths, process.cwd(), openclawDir, ...extraWritePaths];
+  const readPaths = [...DEFAULTS.read_paths, ...(openclawDir ? [openclawDir] : []), ...extraReadPaths];
+  const writePaths = [...DEFAULTS.write_paths, process.cwd(), ...(openclawDir ? [openclawDir] : []), ...extraWritePaths];
   // Deduplicate
   const cfg = {
     port,
     ollama_url: ollamaUrl,
     model,
+    has_openclaw: hasOpenclaw,
     openclaw_dir: openclawDir,
     os,
     read_paths: [...new Set(readPaths)],
@@ -577,7 +600,8 @@ const app = express();
 const PORT = process.env.PORT || config.port || 3333;
 const OLLAMA_URL = process.env.OLLAMA_URL || config.ollama_url || 'http://localhost:11434';
 const MODEL = process.env.DOCTORCLAW_MODEL || config.model || 'glm-4.7:cloud';
-const OPENCLAW_DIR = config.openclaw_dir || '/opt/openclaw';
+const HAS_OPENCLAW = config.has_openclaw !== false && !!config.openclaw_dir;
+const OPENCLAW_DIR = config.openclaw_dir || '';
 const OS_TYPE = config.os || 'linux';
 const BACKUP_DIR = join(__dirname, '.doctorclaw-backups');
 
@@ -681,6 +705,7 @@ app.get('/api/config', (_req, res) => {
     port: PORT,
     ollama_url: OLLAMA_URL,
     model: MODEL,
+    has_openclaw: HAS_OPENCLAW,
     openclaw_dir: OPENCLAW_DIR,
     os: OS_TYPE,
     read_paths: SAFE_READ_PATHS,
@@ -697,6 +722,7 @@ app.post('/api/config', (req, res) => {
     let current = {};
     try { current = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')); } catch {}
 
+    if (updates.has_openclaw !== undefined) current.has_openclaw = !!updates.has_openclaw;
     if (updates.openclaw_dir !== undefined) current.openclaw_dir = updates.openclaw_dir;
     if (updates.ollama_url !== undefined) current.ollama_url = updates.ollama_url;
     if (updates.model !== undefined) current.model = updates.model;
@@ -834,11 +860,14 @@ app.post('/api/stt', async (req, res) => {
 // ── Chat (streaming) ────────────────────────────────────────────────────────
 
 function buildSystemPrompt() {
-  return `You are DoctorClaw, an expert system diagnostics and troubleshooting assistant. Your job is to help the user fix problems on their system — especially issues related to OpenClaw configuration and services, but also general Linux system issues.
+  const openclawContext = HAS_OPENCLAW
+    ? `Your job is to help the user fix problems on their system — especially issues related to OpenClaw configuration and services, but also general Linux system issues.`
+    : `Your job is to help the user fix problems on their system — general Linux system diagnostics and troubleshooting.`;
+  const openclawEnv = HAS_OPENCLAW ? `\n- OpenClaw directory: ${OPENCLAW_DIR}` : '';
+  return `You are DoctorClaw, an expert system diagnostics and troubleshooting assistant. ${openclawContext}
 
 ENVIRONMENT:
-- Operating system: ${OS_TYPE}
-- OpenClaw directory: ${OPENCLAW_DIR}
+- Operating system: ${OS_TYPE}${openclawEnv}
 - Server working directory: ${process.cwd()}
 - Config file location: ${CONFIG_PATH}
 - Readable paths: ${SAFE_READ_PATHS.join(', ')}
@@ -1036,7 +1065,7 @@ const server = app.listen(PORT, () => {
   console.log(`  Ollama endpoint: ${OLLAMA_URL}`);
   console.log(`  Model: ${MODEL}`);
   console.log(`  OS: ${OS_TYPE}`);
-  console.log(`  OpenClaw dir: ${OPENCLAW_DIR}`);
+  console.log(`  OpenClaw: ${HAS_OPENCLAW ? OPENCLAW_DIR : '(not configured)'}`);
   console.log(`  Config: ${CONFIG_PATH}`);
   console.log(`\n  Tip: Run with -i to reconfigure, or -y to skip setup.\n`);
 });
