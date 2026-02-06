@@ -82,6 +82,7 @@ npm run start:quick  # same as -y
 - **Settings UI** — configure everything from the gear icon in the header, no config file editing required
 - **Dark mode** — toggle between light and dark themes
 - **OS-aware** — commands and shell syntax adapt to your configured operating system
+- **Experimental: Audio Conversing** — talk to DoctorClaw using your microphone (speech-to-text) and hear responses spoken aloud (text-to-speech) via [ElevenLabs](https://elevenlabs.io). See [EXPERIMENTAL-FEATS.md](EXPERIMENTAL-FEATS.md) for setup and details.
 
 ---
 
@@ -171,7 +172,8 @@ doctorclaw/
 ├── install.sh                 # macOS/Linux installer
 ├── install.bat                # Windows installer
 ├── .doctorclaw-backups/       # Auto-created backup directory
-└── README.md
+├── README.md
+└── EXPERIMENTAL-FEATS.md      # Documentation for experimental features
 ```
 
 ---
