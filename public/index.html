@@ -710,7 +710,14 @@
   }
 
   function startRecording(){
+    sttBaseText=input.value;
+    isRecording=true;
+    audioBtn.innerHTML=STOP_MIC_ICON;
+    audioBtn.classList.add('recording');
+    audioBtn.title='Stop listening';
+    startLivePreview();
     navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
+      if(!isRecording){stream.getTracks().forEach(t=>t.stop());return;}
       mediaStream=stream;
       const mimeType=getSupportedMimeType();
       mediaRecorder=new MediaRecorder(stream, mimeType?{mimeType}:{});
@@ -768,14 +775,13 @@
         reader.readAsDataURL(audioBlob);
       };
 
-      sttBaseText=input.value;
-      isRecording=true;
-      audioBtn.innerHTML=STOP_MIC_ICON;
-      audioBtn.classList.add('recording');
-      audioBtn.title='Stop listening';
       mediaRecorder.start();
-      startLivePreview();
     }).catch(err=>{
+      isRecording=false;
+      stopLivePreview();
+      audioBtn.innerHTML=MIC_ICON;
+      audioBtn.classList.remove('recording');
+      audioBtn.title='Voice input';
       console.warn('Microphone access denied:',err);
     });
   }
