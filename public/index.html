@@ -559,7 +559,7 @@
   async function sendMsg(){
     const text=input.value.trim();if(!text||streaming)return;const s=cur();
     // If recording, stop it and clear STT state so onstop doesn't refill the input
-    if(isRecording){sttCommittedText='';audioChunks=[];stopRecording();}
+    if(isRecording){sttSkipOnStop=true;stopRecording();}
     if(!s.conversation.length){s.label=text.length>30?text.slice(0,30)+'…':text;renderTabs();}
     s.conversation.push({role:'user',content:text});s.rendered.push({role:'user',content:text});persist();
     input.value='';input.style.height='auto';renderChat();
@@ -665,7 +665,7 @@
   const MIC_ICON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
   const STOP_MIC_ICON='<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
 
-  let isRecording=false, mediaRecorder=null, mediaStream=null, audioChunks=[], sttBaseText='';
+  let isRecording=false, mediaRecorder=null, mediaStream=null, audioChunks=[], sttBaseText='', sttSkipOnStop=false;
   let sttWebSocket=null, sttAudioContext=null, sttSourceNode=null, sttScriptNode=null, sttCommittedText='';
 
   function startLivePreview(){
@@ -776,6 +776,9 @@
       mediaRecorder.onstop=async()=>{
         stopLivePreview();
         if(mediaStream){mediaStream.getTracks().forEach(t=>t.stop());mediaStream=null;}
+
+        // If sent while recording, skip all transcription — input was already captured
+        if(sttSkipOnStop){sttSkipOnStop=false;audioChunks=[];return;}
 
         // If realtime WebSocket gave us committed text, use it and skip batch STT
         if(sttCommittedText.trim()){
