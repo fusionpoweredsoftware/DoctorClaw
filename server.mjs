@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createInterface } from 'readline';
+import WebSocket, { WebSocketServer } from 'ws';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = join(__dirname, 'doctorclaw.config.json');
@@ -474,6 +475,8 @@ app.get('/', (_req, res) => {
 // ── Config API ──────────────────────────────────────────────────────────────
 
 app.get('/api/config', (_req, res) => {
+  let current = {};
+  try { current = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')); } catch {}
   res.json({
     port: PORT,
     ollama_url: OLLAMA_URL,
@@ -482,6 +485,9 @@ app.get('/api/config', (_req, res) => {
     os: OS_TYPE,
     read_paths: SAFE_READ_PATHS,
     write_paths: SAFE_WRITE_PATHS,
+    audio_enabled: !!current.audio_enabled,
+    elevenlabs_api_key: current.elevenlabs_api_key || '',
+    elevenlabs_voice_id: current.elevenlabs_voice_id || '',
   });
 });
 
@@ -498,6 +504,9 @@ app.post('/api/config', (req, res) => {
     if (updates.os !== undefined) current.os = updates.os;
     if (updates.read_paths !== undefined) current.read_paths = updates.read_paths;
     if (updates.write_paths !== undefined) current.write_paths = updates.write_paths;
+    if (updates.audio_enabled !== undefined) current.audio_enabled = !!updates.audio_enabled;
+    if (updates.elevenlabs_api_key !== undefined) current.elevenlabs_api_key = updates.elevenlabs_api_key;
+    if (updates.elevenlabs_voice_id !== undefined) current.elevenlabs_voice_id = updates.elevenlabs_voice_id;
 
     writeFileSync(CONFIG_PATH, JSON.stringify(current, null, 2) + '\n', 'utf-8');
 
@@ -529,6 +538,96 @@ app.get('/api/health', async (_req, res) => {
     }
   } catch {
     res.json({ status: 'error', message: 'Cannot reach Ollama at ' + OLLAMA_URL });
+  }
+});
+
+// ── ElevenLabs TTS Proxy ─────────────────────────────────────────────────────
+
+app.post('/api/tts', async (req, res) => {
+  const { text } = req.body;
+  if (!text || !text.trim()) {
+    return res.status(400).json({ error: 'No text provided' });
+  }
+
+  let current = {};
+  try { current = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')); } catch {}
+
+  const apiKey = current.elevenlabs_api_key;
+  const voiceId = current.elevenlabs_voice_id || '21m00Tcm4TlvDq8ikWAM';
+
+  if (!apiKey) {
+    return res.status(400).json({ error: 'ElevenLabs API key not configured' });
+  }
+
+  try {
+    const ttsResp = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
+      method: 'POST',
+      headers: {
+        'xi-api-key': apiKey,
+        'Content-Type': 'application/json',
+        'Accept': 'audio/mpeg',
+      },
+      body: JSON.stringify({
+        text: text.trim(),
+        model_id: 'eleven_monolingual_v1',
+        voice_settings: { stability: 0.5, similarity_boost: 0.5 },
+      }),
+    });
+
+    if (!ttsResp.ok) {
+      const errText = await ttsResp.text();
+      return res.status(ttsResp.status).json({ error: errText });
+    }
+
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Cache-Control', 'no-cache');
+    const buffer = await ttsResp.arrayBuffer();
+    res.send(Buffer.from(buffer));
+  } catch (err) {
+    res.status(500).json({ error: 'TTS request failed: ' + err.message });
+  }
+});
+
+// ── ElevenLabs STT Proxy (Scribe) ────────────────────────────────────────────
+
+app.post('/api/stt', async (req, res) => {
+  const { audio, mimeType } = req.body;
+  if (!audio) {
+    return res.status(400).json({ error: 'No audio data provided' });
+  }
+
+  let current = {};
+  try { current = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')); } catch {}
+
+  const apiKey = current.elevenlabs_api_key;
+  if (!apiKey) {
+    return res.status(400).json({ error: 'ElevenLabs API key not configured' });
+  }
+
+  try {
+    const audioBuffer = Buffer.from(audio, 'base64');
+    const ext = (mimeType || '').includes('ogg') ? 'ogg' : (mimeType || '').includes('mp4') ? 'mp4' : 'webm';
+    const blob = new Blob([audioBuffer], { type: mimeType || 'audio/webm' });
+
+    const formData = new FormData();
+    formData.append('file', blob, `recording.${ext}`);
+    formData.append('model_id', 'scribe_v2');
+
+    const sttResp = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
+      method: 'POST',
+      headers: { 'xi-api-key': apiKey },
+      body: formData,
+    });
+
+    if (!sttResp.ok) {
+      const errText = await sttResp.text();
+      return res.status(sttResp.status).json({ error: errText });
+    }
+
+    const result = await sttResp.json();
+    res.json({ text: result.text || '' });
+  } catch (err) {
+    res.status(500).json({ error: 'STT request failed: ' + err.message });
   }
 });
 
@@ -747,6 +846,79 @@ server.on('error', (err) => {
     console.error(`\n  ❌ Server error: ${err.message}\n`);
   }
   process.exit(1);
+});
+
+// ── WebSocket: Realtime STT Proxy (ElevenLabs Scribe v2 Realtime) ────────────
+
+const wss = new WebSocketServer({ noServer: true });
+
+server.on('upgrade', (request, socket, head) => {
+  const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
+  if (pathname === '/ws/stt') {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request);
+    });
+  } else {
+    socket.destroy();
+  }
+});
+
+wss.on('connection', (clientWs) => {
+  let current = {};
+  try { current = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')); } catch {}
+  const apiKey = current.elevenlabs_api_key;
+
+  if (!apiKey) {
+    clientWs.send(JSON.stringify({ error: 'ElevenLabs API key not configured' }));
+    clientWs.close();
+    return;
+  }
+
+  const elevenWs = new WebSocket(
+    'wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=scribe_v2_realtime&language_code=en&sample_rate=16000',
+    { headers: { 'xi-api-key': apiKey } }
+  );
+
+  let elevenReady = false;
+
+  elevenWs.on('open', () => {
+    elevenReady = true;
+    if (clientWs.readyState === WebSocket.OPEN) {
+      clientWs.send(JSON.stringify({ type: 'ready' }));
+    }
+  });
+
+  elevenWs.on('message', (data) => {
+    if (clientWs.readyState === WebSocket.OPEN) {
+      clientWs.send(data.toString());
+    }
+  });
+
+  elevenWs.on('error', (err) => {
+    console.warn('ElevenLabs STT WebSocket error:', err.message);
+    if (clientWs.readyState === WebSocket.OPEN) {
+      clientWs.send(JSON.stringify({ error: 'ElevenLabs connection error' }));
+    }
+    try { clientWs.close(); } catch {}
+  });
+
+  elevenWs.on('close', () => {
+    if (clientWs.readyState === WebSocket.OPEN) clientWs.close();
+  });
+
+  clientWs.on('message', (data) => {
+    if (elevenReady && elevenWs.readyState === WebSocket.OPEN) {
+      elevenWs.send(data.toString());
+    }
+  });
+
+  clientWs.on('close', () => {
+    if (elevenWs.readyState === WebSocket.OPEN) elevenWs.close();
+  });
+
+  clientWs.on('error', () => {
+    if (elevenWs.readyState === WebSocket.OPEN) elevenWs.close();
+  });
 });
 
 } // end boot()
