@@ -664,21 +664,38 @@
   const STOP_MIC_ICON='<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
 
   let isRecording=false, mediaRecorder=null, mediaStream=null, audioChunks=[], sttBaseText='';
-  let sttIntervalId=null, sttInterimPending=false;
+  let speechRecognition=null;
 
-  async function sendInterimSTT(){
-    if(!isRecording||!audioChunks.length||sttInterimPending) return;
-    sttInterimPending=true;
+  function startLivePreview(){
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR) return;
     try{
-      const mType=mediaRecorder?.mimeType||'audio/webm';
-      const blob=new Blob([...audioChunks],{type:mType});
-      const reader=new FileReader();
-      const base64=await new Promise(r=>{reader.onloadend=()=>r(reader.result.split(',')[1]);reader.readAsDataURL(blob);});
-      if(!base64||!isRecording){sttInterimPending=false;return;}
-      const resp=await fetch('/api/stt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({audio:base64,mimeType:mType})});
-      if(resp.ok&&isRecording){const data=await resp.json();if(data.text){input.value=sttBaseText+(sttBaseText?' ':'')+data.text;input.style.height='auto';input.style.height=Math.min(input.scrollHeight,160)+'px';}}
-    }catch{}
-    sttInterimPending=false;
+      speechRecognition=new SR();
+      speechRecognition.continuous=true;
+      speechRecognition.interimResults=true;
+      speechRecognition.lang='en-US';
+      let retries=0;
+      speechRecognition.onresult=function(ev){
+        if(!isRecording) return;
+        retries=0;
+        let t='';
+        for(let i=0;i<ev.results.length;i++) t+=ev.results[i][0].transcript;
+        input.value=sttBaseText+(sttBaseText?' ':'')+t;
+        input.style.height='auto';
+        input.style.height=Math.min(input.scrollHeight,160)+'px';
+      };
+      speechRecognition.onerror=function(){};
+      speechRecognition.onend=function(){
+        if(!isRecording||!speechRecognition) return;
+        if(retries<5){retries++;try{speechRecognition.start();}catch{speechRecognition=null;}}
+        else speechRecognition=null;
+      };
+      speechRecognition.start();
+    }catch(e){speechRecognition=null;}
+  }
+
+  function stopLivePreview(){
+    if(speechRecognition){try{speechRecognition.abort();}catch{}speechRecognition=null;}
   }
 
   function updateAudioBtnVisibility(){
@@ -704,8 +721,7 @@
       };
 
       mediaRecorder.onstop=async()=>{
-        if(sttIntervalId){clearInterval(sttIntervalId);sttIntervalId=null;}
-        sttInterimPending=false;
+        stopLivePreview();
         if(mediaStream){mediaStream.getTracks().forEach(t=>t.stop());mediaStream=null;}
         if(!audioChunks.length) return;
 
@@ -757,8 +773,8 @@
       audioBtn.innerHTML=STOP_MIC_ICON;
       audioBtn.classList.add('recording');
       audioBtn.title='Stop listening';
-      mediaRecorder.start(2000);
-      sttIntervalId=setInterval(sendInterimSTT,3000);
+      mediaRecorder.start();
+      startLivePreview();
     }).catch(err=>{
       console.warn('Microphone access denied:',err);
     });
@@ -766,8 +782,7 @@
 
   function stopRecording(){
     isRecording=false;
-    if(sttIntervalId){clearInterval(sttIntervalId);sttIntervalId=null;}
-    sttInterimPending=false;
+    stopLivePreview();
     audioBtn.innerHTML=MIC_ICON;
     audioBtn.classList.remove('recording');
     audioBtn.title='Voice input';
