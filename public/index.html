@@ -512,6 +512,8 @@
   }
 
   function restoreAct(act,after){
+    act.target=(act.target||'').replace(/\[\/ACTION\s*$/,'').trimEnd();
+    if(act.content)act.content=act.content.replace(/\[\/ACTION\s*$/,'').trimEnd();
     const card=document.createElement('div');card.className='action-card no-anim';
     const bc=actBadge(act.type);
     const tl=actLabel(act.type);
@@ -606,9 +608,11 @@
       const RE_NEW=new RegExp('\\[ACTION:('+ACT_TYPES+'):([\\s\\S]+?)\\[/ACTION\\]','g');
       const RE_OLD=new RegExp('\\[ACTION:('+ACT_TYPES+'):([^\\]]+)\\]','g');
       let m;
+      const CLEAN_TAG=/\[\/ACTION\s*$/;
       function extractAct(m){
         const type=m[1];let target,content;
-        if(type==='WRITE_FILE'||type==='RUN_SCRIPT'){const ci=m[2].indexOf(':');if(ci>-1){target=m[2].slice(0,ci);content=m[2].slice(ci+1);}else{target=m[2];content=null;}}else{target=m[2];content=null;}
+        const raw=m[2].replace(CLEAN_TAG,'').trimEnd();
+        if(type==='WRITE_FILE'||type==='RUN_SCRIPT'){const ci=raw.indexOf(':');if(ci>-1){target=raw.slice(0,ci);content=raw.slice(ci+1).replace(CLEAN_TAG,'').trimEnd();}else{target=raw;content=null;}}else{target=raw;content=null;}
         return {type,target,content,status:'pending',result:null,resultSuccess:null};
       }
       function buildCard(act){
