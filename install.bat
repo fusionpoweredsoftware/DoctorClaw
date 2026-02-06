@@ -138,8 +138,25 @@ if %errorlevel% equ 0 (
 ) else (
     echo.
     echo   [!] Ollama not installed. DoctorClaw needs Ollama to run.
-    echo       Install from: https://ollama.com
-    echo       Then run:     ollama pull glm-4.7:cloud
+    set /p "INSTALL_OLLAMA=  Install Ollama now? [Y/n] "
+    if /i "!INSTALL_OLLAMA!"=="" set "INSTALL_OLLAMA=Y"
+    if /i "!INSTALL_OLLAMA!"=="Y" (
+        echo   Downloading Ollama installer...
+        powershell -Command "& { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://ollama.com/download/OllamaSetup.exe' -OutFile '%TEMP%\OllamaSetup.exe' }" 2>nul
+        if !errorlevel! equ 0 (
+            echo   Running Ollama installer...
+            "%TEMP%\OllamaSetup.exe"
+            del "%TEMP%\OllamaSetup.exe" 2>nul
+            echo.
+            echo   [OK] Ollama installer launched. You may need to restart your terminal after installation.
+        ) else (
+            echo   [!] Failed to download Ollama. Please install manually from: https://ollama.com
+        )
+    ) else (
+        echo   [!] Ollama is required. Install from: https://ollama.com
+    )
+    echo       Tip: Pull a model with: ollama pull llama3.1
+    echo       Or for cloud service:   ollama pull glm-4.7:cloud
     echo.
 )
 

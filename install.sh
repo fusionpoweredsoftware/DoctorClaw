@@ -152,9 +152,21 @@ check_ollama() {
   else
     warn "Ollama not installed. DoctorClaw needs Ollama to run."
     echo ""
-    echo -e "  ${DIM}Install Ollama from: ${CYAN}https://ollama.com${RESET}"
-    echo -e "  ${DIM}Then pull a model:   ${CYAN}ollama pull glm-4.7:cloud${RESET}"
-    echo ""
+    read -rp "  Install Ollama now? [Y/n] " answer
+    answer="${answer:-Y}"
+    if [[ "$answer" =~ ^[Yy] ]]; then
+      info "Installing Ollama..."
+      curl -fsSL https://ollama.com/install.sh | sh || fail "Failed to install Ollama"
+      success "Ollama installed successfully"
+      echo ""
+      echo -e "  ${DIM}Tip: Pull a model with: ${CYAN}ollama pull llama3.1${RESET}"
+      echo -e "  ${DIM}Or for cloud service:   ${CYAN}ollama pull glm-4.7:cloud${RESET}"
+      echo ""
+    else
+      warn "Ollama is required. Install from: https://ollama.com"
+      echo -e "  ${DIM}Then pull a model:   ${CYAN}ollama pull llama3.1${RESET}"
+      echo ""
+    fi
   fi
 }
 
