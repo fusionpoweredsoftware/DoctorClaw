@@ -562,7 +562,7 @@
     const b=document.createElement('div');b.className='message-body assistant-body';
     const dot=document.createElement('span');dot.className='streaming-dot';b.appendChild(dot);
     w.appendChild(l);w.appendChild(b);chatArea.appendChild(w);scrollDown();
-    let full='',aborted=false,activeReader=null;
+    let full='',aborted=false,activeReader=null;ttsStreamPos=0;
     abortController.signal.addEventListener('abort',()=>{aborted=true;if(activeReader)try{activeReader.cancel();}catch{}});
     try{
       const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:s.conversation})});
@@ -570,7 +570,7 @@
       if(!res.ok){let detail;try{const err=await res.json();detail=err.detail||err.error||'Unknown error';}catch{detail=res.statusText||'Request failed';}const errMsg='Error: '+detail;b.innerHTML=fmt(errMsg);s.conversation.push({role:'assistant',content:errMsg});s.rendered.push({role:'assistant',content:errMsg});persist();return;}
       activeReader=res.body.getReader();const dec=new TextDecoder();let buf='';
       while(true){const{done,value}=await activeReader.read();if(done||aborted)break;buf+=dec.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop()||'';
-        for(const line of lines){if(line.startsWith('data: ')){const p=line.slice(6).trim();if(p==='[DONE]')continue;try{const j=JSON.parse(p);if(j.message?.content){full+=j.message.content;b.innerHTML=fmt(full.replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'').trim());scrollDown();}}catch{}}}}
+        for(const line of lines){if(line.startsWith('data: ')){const p=line.slice(6).trim();if(p==='[DONE]')continue;try{const j=JSON.parse(p);if(j.message?.content){full+=j.message.content;b.innerHTML=fmt(full.replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'').trim());scrollDown();if(!aborted)streamTTSCheck(full,false);}}catch{}}}}
     }catch(e){
       if(aborted){if(!full.trim()){if(dot.parentNode)dot.remove();w.remove();return;}}
       else{full+='\n\n[Connection interrupted: '+e.message+'. Try sending your message again.]';b.innerHTML=fmt(full.replace(ACT_RE_STRIP,'').trim());scrollDown();}
@@ -596,11 +596,8 @@
       }
     }
     s.rendered.push(entry);persist();scrollDown();
-    // Trigger TTS if audio is enabled and response wasn't aborted
-    if(audioEnabled&&!aborted&&full.trim()){
-      const ttsChunks=parseResponseForTTS(full);
-      if(ttsChunks.length) queueTTS(ttsChunks);
-    }
+    // Flush any remaining TTS text that didn't hit the 2-sentence threshold
+    if(!aborted) streamTTSCheck(full,true);
   }
 
   function setSendBtnStreaming(on){
@@ -757,7 +754,7 @@
 
   // ── Text-to-Speech via ElevenLabs ──
 
-  let ttsPromises=[], ttsPlaying=false, currentAudio=null, ttsAborted=false;
+  let ttsPromises=[], ttsPlaying=false, currentAudio=null, ttsAborted=false, ttsStreamPos=0;
 
   function showTTSIndicator(on){
     if(on) ttsIndicator.classList.add('active');
@@ -799,6 +796,61 @@
   }
 
   ttsStopBtn.addEventListener('click',stopTTS);
+
+  function fireTTSChunks(chunks){
+    const promises=chunks.map(text=>
+      fetch('/api/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})})
+      .then(r=>r.ok?r.blob():null).catch(()=>null)
+    );
+    ttsPromises.push(...promises);
+    if(!ttsPlaying) playNextTTS();
+  }
+
+  // Called during streaming to send TTS in ~2-sentence chunks as text arrives
+  function streamTTSCheck(full,isDone){
+    if(!audioEnabled||ttsAborted) return;
+    const stripped=full.replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'');
+    // Don't process while inside an unclosed code block
+    const totalFences=(stripped.match(/```/g)||[]).length;
+    if(totalFences%2!==0&&!isDone) return;
+
+    const available=stripped.slice(ttsStreamPos);
+    if(!available.trim()&&!isDone) return;
+
+    if(isDone){
+      // Flush everything remaining
+      if(available.trim()){
+        const chunks=parseResponseForTTS(available);
+        if(chunks.length) fireTTSChunks(chunks);
+      }
+      ttsStreamPos=0;
+      return;
+    }
+
+    // Find a split point: after 2 sentence endings or a paragraph break, outside code blocks
+    let sentenceEnds=0,splitAt=-1,codeDepth=0;
+    for(let i=0;i<available.length;i++){
+      if(available.slice(i,i+3)==='```'){codeDepth=codeDepth?0:1;i+=2;continue;}
+      if(codeDepth) continue;
+      const c=available[i];
+      // Paragraph break
+      if(c==='\n'&&i+1<available.length&&available[i+1]==='\n'&&available.slice(0,i).trim()){
+        splitAt=i;break;
+      }
+      // Sentence ending: . or ? or ! followed by space or newline
+      if((c==='.'||c==='?'||c==='!')&&i+1<available.length&&(available[i+1]===' '||available[i+1]==='\n')){
+        sentenceEnds++;
+        if(sentenceEnds>=2){splitAt=i+1;break;}
+      }
+    }
+
+    if(splitAt>=0){
+      const chunk=available.slice(0,splitAt+1);
+      ttsStreamPos+=splitAt+1;
+      const ttsChunks=parseResponseForTTS(chunk);
+      if(ttsChunks.length) fireTTSChunks(ttsChunks);
+    }
+  }
 
   function parseResponseForTTS(text){
     // Remove action markers
