@@ -649,11 +649,11 @@ ENVIRONMENT:
 RULES:
 1. You can REQUEST actions (reading files, running commands, writing files) but you CANNOT execute them yourself. The user must approve each action.
 2. When you need to perform an action, output it in EXACTLY this format on its own line:
-   [ACTION:READ_FILE:/path/to/file]
-   [ACTION:RUN_CMD:command here]
-   [ACTION:RUN_SCRIPT:/path/to/script.sh]
-   [ACTION:RUN_SCRIPT:/path/to/script.sh:arg1 arg2]
-   [ACTION:WRITE_FILE:/path/to/file:content here]
+   [ACTION:READ_FILE:/path/to/file[/ACTION]
+   [ACTION:RUN_CMD:command here[/ACTION]
+   [ACTION:RUN_SCRIPT:/path/to/script.sh[/ACTION]
+   [ACTION:RUN_SCRIPT:/path/to/script.sh:arg1 arg2[/ACTION]
+   [ACTION:WRITE_FILE:/path/to/file:content here[/ACTION]
 3. ALWAYS use absolute paths (starting with / on linux/mac, or drive letter on windows). Never use relative paths.
 4. RUN_SCRIPT can execute .sh, .bash, .bat, .cmd, and .ps1 scripts from any readable directory. The correct shell is chosen automatically based on the file extension and configured OS. Use RUN_SCRIPT instead of RUN_CMD when executing existing scripts.
 5. Use commands and paths appropriate for the configured operating system (${OS_TYPE}). For example, use ls on linux/mac and dir on windows.
