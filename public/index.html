@@ -925,6 +925,16 @@
     }
   }
 
+  function stripMd(s){
+    return s
+      .replace(/\*\*(.+?)\*\*/g,'$1').replace(/__(.+?)__/g,'$1')
+      .replace(/\*(.+?)\*/g,'$1').replace(/(?<!\w)_([^_]+)_(?!\w)/g,'$1')
+      .replace(/`([^`]+)`/g,'$1')
+      .replace(/^#{1,6}\s+/gm,'')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g,'$1')
+      .replace(/^\s*[-*]\s+/gm,'').replace(/^\s*\d+\.\s+/gm,'');
+  }
+
   function parseResponseForTTS(text){
     // Remove action markers
     text=text.replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'').trim();
@@ -947,7 +957,7 @@
         // Split into paragraph-sized chunks on double newlines
         const paragraphs=part.split(/\n\n+/);
         for(const p of paragraphs){
-          const cleaned=p.replace(/\n/g,' ').trim();
+          const cleaned=stripMd(p.replace(/\n/g,' ').trim());
           if(cleaned) chunks.push(cleaned);
         }
       }
