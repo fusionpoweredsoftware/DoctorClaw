@@ -932,7 +932,10 @@
       .replace(/`([^`]+)`/g,'$1')
       .replace(/^#{1,6}\s+/gm,'')
       .replace(/\[([^\]]+)\]\([^)]+\)/g,'$1')
-      .replace(/^\s*[-*]\s+/gm,'').replace(/^\s*\d+\.\s+/gm,'');
+      .replace(/^\s*[-*]\s+/gm,'').replace(/^\s*\d+\.\s+/gm,'')
+      .replace(/[\u{1F000}-\u{1FFFF}|\u{2600}-\u{27BF}|\u{2B50}|\u{FE00}-\u{FE0F}|\u{200D}|\u{20E3}|\u{E0020}-\u{E007F}|\u{2702}-\u{27B0}|\u{1F900}-\u{1F9FF}|\u{1FA00}-\u{1FA6F}|\u{1FA70}-\u{1FAFF}|\u{2194}-\u{2199}|\u{2934}-\u{2935}|\u{25AA}-\u{25FE}|\u{2300}-\u{23FF}|\u{2190}-\u{21FF}|\u{2934}-\u{2935}|\u{23E9}-\u{23F3}|\u{23F8}-\u{23FA}]/gu,'')
+      .replace(/[~>|]/g,' ')
+      .replace(/\s{2,}/g,' ').trim();
   }
 
   function parseResponseForTTS(text){
