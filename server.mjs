@@ -5,6 +5,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createInterface } from 'readline';
 import WebSocket, { WebSocketServer } from 'ws';
+import { getVersion } from './version.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = join(__dirname, 'doctorclaw.config.json');
@@ -14,6 +15,12 @@ const CONFIG_PATH = join(__dirname, 'doctorclaw.config.json');
 const args = process.argv.slice(2);
 const FLAG_YES = args.includes('-y') || args.includes('--yes');
 const FLAG_INTERACTIVE = args.includes('-i') || args.includes('--interactive');
+const FLAG_VERSION = args.includes('-v') || args.includes('--version');
+
+if (FLAG_VERSION) {
+  console.log(`DoctorClaw v${getVersion()}`);
+  process.exit(0);
+}
 
 // ── Interactive Setup ────────────────────────────────────────────────────────
 
@@ -750,6 +757,12 @@ app.post('/api/config', (req, res) => {
   }
 });
 
+// ── Version API ─────────────────────────────────────────────────────────────
+
+app.get('/api/version', (_req, res) => {
+  res.json({ version: getVersion() });
+});
+
 // ── Ollama health check ─────────────────────────────────────────────────────
 
 app.get('/api/health', async (_req, res) => {
@@ -1061,13 +1074,13 @@ app.post('/api/execute', (req, res) => {
 // ── Start ───────────────────────────────────────────────────────────────────
 
 const server = app.listen(PORT, () => {
-  console.log(`\n  [+] DoctorClaw is running at http://localhost:${PORT}\n`);
+  console.log(`\n  [+] DoctorClaw v${getVersion()} is running at http://localhost:${PORT}\n`);
   console.log(`  Ollama endpoint: ${OLLAMA_URL}`);
   console.log(`  Model: ${MODEL}`);
   console.log(`  OS: ${OS_TYPE}`);
   console.log(`  OpenClaw: ${HAS_OPENCLAW ? OPENCLAW_DIR : '(not configured)'}`);
   console.log(`  Config: ${CONFIG_PATH}`);
-  console.log(`\n  Tip: Run with -i to reconfigure, or -y to skip setup.\n`);
+  console.log(`\n  Tip: Run with -i to reconfigure, -y to skip setup, or -v for version.\n`);
 });
 
 server.on('error', (err) => {
