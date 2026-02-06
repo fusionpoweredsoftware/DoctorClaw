@@ -551,6 +551,7 @@
   function actBadge(t){return t==='READ_FILE'?'read':t==='RUN_CMD'?'cmd':t==='RUN_SCRIPT'?'script':'write';}
   function actLabel(t){return t==='READ_FILE'?'Read File':t==='RUN_CMD'?'Run Command':t==='RUN_SCRIPT'?'Run Script':'Write File';}
   const ACT_RE_STRIP=/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g;
+  const ACT_RE_PARTIAL=/\[ACTION[^\]]*$/;
 
   input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,160)+'px';});
   input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();}});
@@ -586,14 +587,14 @@
       if(!res.ok){let detail;try{const err=await res.json();detail=err.detail||err.error||'Unknown error';}catch{detail=res.statusText||'Request failed';}const errMsg='Error: '+detail;b.innerHTML=fmt(errMsg);s.conversation.push({role:'assistant',content:errMsg});s.rendered.push({role:'assistant',content:errMsg});persist();return;}
       activeReader=res.body.getReader();const dec=new TextDecoder();let buf='';
       while(true){const{done,value}=await activeReader.read();if(done||aborted)break;buf+=dec.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop()||'';
-        for(const line of lines){if(line.startsWith('data: ')){const p=line.slice(6).trim();if(p==='[DONE]')continue;try{const j=JSON.parse(p);if(j.message?.content){full+=j.message.content;b.innerHTML=fmt(full.replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'').trim());scrollDown();if(!aborted)streamTTSCheck(full,false);}}catch{}}}}
+        for(const line of lines){if(line.startsWith('data: ')){const p=line.slice(6).trim();if(p==='[DONE]')continue;try{const j=JSON.parse(p);if(j.message?.content){full+=j.message.content;b.innerHTML=fmt(full.replace(ACT_RE_STRIP,'').replace(ACT_RE_PARTIAL,'').trim());scrollDown();if(!aborted)streamTTSCheck(full,false);}}catch{}}}}
     }catch(e){
       if(aborted){if(!full.trim()){if(dot.parentNode)dot.remove();w.remove();return;}}
-      else{full+='\n\n[Connection interrupted: '+e.message+'. Try sending your message again.]';b.innerHTML=fmt(full.replace(ACT_RE_STRIP,'').trim());scrollDown();}
+      else{full+='\n\n[Connection interrupted: '+e.message+'. Try sending your message again.]';b.innerHTML=fmt(full.replace(ACT_RE_STRIP,'').replace(ACT_RE_PARTIAL,'').trim());scrollDown();}
     }
     if(dot.parentNode)dot.remove();
     if(!full.trim())full='Hello! I\'m DoctorClaw, your system diagnostics assistant. How can I help you today?';
-    b.innerHTML=fmt(full.replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'').trim());
+    b.innerHTML=fmt(full.replace(ACT_RE_STRIP,'').replace(ACT_RE_PARTIAL,'').trim());
     s.conversation.push({role:'assistant',content:full});
     const entry={role:'assistant',content:full,actions:[]};
     if(!aborted){
