@@ -190,6 +190,20 @@ doctorclaw/
 
 ---
 
+## 🚨 Calling All Hands — Contributors Wanted!
+
+> **Want to help build the future of system diagnostics?**
+>
+> DoctorClaw is growing and we need developers like YOU to help shape what comes next. Whether you're into AI, frontend, backend, DevOps, or just love tinkering with system tools — there's a place for you here.
+>
+> **📬 Reach out to join the project:**
+>
+> ### **[dev@doctorclaw.ai](mailto:dev@doctorclaw.ai)**
+>
+> Drop us a line, tell us what you're passionate about, and let's build something great together. All skill levels welcome.
+
+---
+
 ## Requirements
 
 - **Node.js** 18+ (the installer can set this up for you)
