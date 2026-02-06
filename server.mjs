@@ -47,6 +47,164 @@ async function detectModels(ollamaUrl) {
   return [];
 }
 
+// ── Ollama Installation Helpers ──────────────────────────────────────────────
+
+const LOCAL_MODEL_DEFAULT = 'llama3.1';
+
+function isOllamaInstalled() {
+  try {
+    const cmd = process.platform === 'win32' ? 'where ollama' : 'which ollama';
+    execSync(cmd, { encoding: 'utf-8', stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function installOllamaCli() {
+  if (process.platform === 'win32') {
+    console.log('  Ollama must be installed manually on Windows.');
+    console.log('  Download from: https://ollama.com/download');
+    return false;
+  }
+  console.log('  Installing Ollama...');
+  try {
+    execSync('curl -fsSL https://ollama.com/install.sh | sh', {
+      stdio: 'inherit',
+      timeout: 120000,
+    });
+    console.log('');
+    console.log('  ✓ Ollama installed successfully.');
+    return true;
+  } catch (err) {
+    console.log(`  ✗ Failed to install Ollama: ${err.message}`);
+    console.log('  Install manually from: https://ollama.com');
+    return false;
+  }
+}
+
+async function ensureOllamaRunning(ollamaUrl) {
+  try {
+    const resp = await fetch(`${ollamaUrl}/api/tags`);
+    if (resp.ok) return true;
+  } catch {}
+
+  if (!isOllamaInstalled()) return false;
+
+  console.log('  Ollama is installed but not running. Starting Ollama service...');
+  try {
+    const child = exec('ollama serve');
+    child.stdout?.on('data', () => {});
+    child.stderr?.on('data', () => {});
+    child.unref();
+
+    // Wait for it to come up (up to ~10s)
+    for (let i = 0; i < 5; i++) {
+      await new Promise(r => setTimeout(r, 2000));
+      try {
+        const resp = await fetch(`${ollamaUrl}/api/tags`);
+        if (resp.ok) {
+          console.log('  ✓ Ollama service started.');
+          return true;
+        }
+      } catch {}
+    }
+    console.log('  ⚠  Could not start Ollama. Please start it manually: ollama serve');
+  } catch {
+    console.log('  ⚠  Could not start Ollama. Please start it manually: ollama serve');
+  }
+  return false;
+}
+
+function getOllamaVersion() {
+  try {
+    const output = execSync('ollama --version', { encoding: 'utf-8', stdio: 'pipe', timeout: 5000 }).trim();
+    const match = output.match(/(\d+\.\d+\.\d+)/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+async function getLatestOllamaVersion() {
+  try {
+    const resp = await fetch('https://api.github.com/repos/ollama/ollama/releases/latest', {
+      headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'DoctorClaw' },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      const tag = data.tag_name || '';
+      const match = tag.match(/(\d+\.\d+\.\d+)/);
+      return match ? match[1] : null;
+    }
+  } catch {}
+  return null;
+}
+
+function compareVersions(a, b) {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] || 0;
+    const nb = pb[i] || 0;
+    if (na > nb) return 1;
+    if (na < nb) return -1;
+  }
+  return 0;
+}
+
+/**
+ * Check if Ollama is up-to-date. If outdated, strongly recommend updating.
+ * @param {object|null} rl - readline interface for interactive mode, or null for non-interactive
+ */
+async function checkOllamaUpdate(rl) {
+  const installed = getOllamaVersion();
+  if (!installed) {
+    console.log('  Could not determine installed Ollama version.');
+    return;
+  }
+  console.log(`  Ollama version: v${installed}`);
+
+  const latest = await getLatestOllamaVersion();
+  if (!latest) {
+    console.log('  Could not check for Ollama updates (network unreachable).');
+    return;
+  }
+
+  if (compareVersions(installed, latest) >= 0) {
+    console.log(`  ✓ Ollama is up to date (v${installed}).`);
+    return;
+  }
+
+  // Outdated — strong warning
+  console.log('');
+  console.log(`  ⚠⚠  WARNING: Ollama is OUT OF DATE! Installed: v${installed} → Latest: v${latest}`);
+  console.log('  ⚠⚠  Running an outdated version of Ollama can cause model download failures,');
+  console.log('  ⚠⚠  compatibility issues, and unexpected errors during operation.');
+  console.log('  ⚠⚠  Updating is STRONGLY recommended before continuing.');
+
+  if (rl) {
+    // Interactive — offer to update
+    console.log('');
+    const updateAnswer = await ask(rl, 'Update Ollama now? (STRONGLY recommended) (y/n)', 'y');
+    if (updateAnswer.toLowerCase().startsWith('y')) {
+      installOllamaCli();
+    } else {
+      console.log('  Continuing with outdated Ollama. You may experience issues.');
+    }
+  } else {
+    // Non-interactive (-y flag) — warn but don't force
+    console.log('');
+    if (process.platform === 'win32') {
+      console.log('  Update Ollama from: https://ollama.com/download');
+    } else {
+      console.log('  Update with: curl -fsSL https://ollama.com/install.sh | sh');
+    }
+  }
+  console.log('');
+}
+
 /**
  * Check if a directory looks like an OpenClaw installation.
  * A directory qualifies if it has "openclaw" in its path OR contains
@@ -226,6 +384,15 @@ async function runSetup() {
 
   // Decide whether to run interactive setup
   if (FLAG_YES) {
+    // With -y, auto-install Ollama if missing and assume cloud service
+    if (!isOllamaInstalled()) {
+      console.log('  Ollama not found. Installing automatically (-y flag)...');
+      installOllamaCli();
+    } else {
+      // Already installed — check if up to date (warn only, no prompt with -y)
+      await checkOllamaUpdate(null);
+    }
+
     if (configExists) {
       const existing = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
       console.log('  Skipping setup (-y flag), using existing config.');
@@ -292,11 +459,41 @@ async function runSetup() {
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
 
+  // Check Ollama installation
+  if (!isOllamaInstalled()) {
+    console.log('  Ollama is not installed. DoctorClaw requires Ollama to function.');
+    console.log('');
+    const installAnswer = await ask(rl, 'Install Ollama now? (y/n)', 'y');
+    if (installAnswer.toLowerCase().startsWith('y')) {
+      installOllamaCli();
+    } else {
+      console.log('');
+      console.log('  Ollama is required. Install from: https://ollama.com');
+      console.log('  You can continue setup, but DoctorClaw will not work until Ollama is installed.');
+    }
+    console.log('');
+  } else {
+    // Already installed — check if up to date
+    await checkOllamaUpdate(rl);
+  }
+
   // Port
   const port = parseInt(await ask(rl, 'Server port', DEFAULTS.port), 10) || DEFAULTS.port;
 
   // Ollama URL
   const ollamaUrl = await ask(rl, 'Ollama URL', DEFAULTS.ollama_url);
+
+  // Ask about Ollama cloud service
+  console.log('');
+  console.log('  Ollama can run models locally or via the cloud service.');
+  console.log('  The default model (glm-4.7:cloud) requires an Ollama cloud subscription.');
+  console.log('  Without cloud, models run locally on your hardware.');
+  const cloudAnswer = await ask(rl, 'Do you have Ollama cloud service? (y/n)', 'n');
+  const hasCloud = cloudAnswer.toLowerCase().startsWith('y');
+  const defaultModel = hasCloud ? DEFAULTS.model : LOCAL_MODEL_DEFAULT;
+
+  // Try to ensure Ollama is running for model detection
+  await ensureOllamaRunning(ollamaUrl);
 
   // Detect available models
   console.log('');
@@ -305,10 +502,13 @@ async function runSetup() {
   let model;
   if (models.length > 0) {
     console.log(`  Found ${models.length} model(s): ${models.join(', ')}`);
-    model = await ask(rl, 'Model to use', models.includes(DEFAULTS.model) ? DEFAULTS.model : models[0]);
+    model = await ask(rl, 'Model to use', models.includes(defaultModel) ? defaultModel : models[0]);
   } else {
     console.log('  Could not reach Ollama or no models found.');
-    model = await ask(rl, 'Model to use', DEFAULTS.model);
+    if (!hasCloud) {
+      console.log(`  Tip: Pull a model with: ollama pull ${defaultModel}`);
+    }
+    model = await ask(rl, 'Model to use', defaultModel);
   }
 
   // OS
