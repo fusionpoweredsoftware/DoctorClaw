@@ -72,13 +72,14 @@
   .message-body pre code { background: none; padding: 0; }
   .action-card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius); margin: 12px 0; overflow: hidden; box-shadow: var(--shadow-sm); animation: msgIn 0.3s ease-out; }
   .action-card.no-anim { animation: none; }
-  .action-header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-inset); }
+  .action-header { display: flex; align-items: flex-start; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-inset); }
   .action-type-badge { font-family: var(--font-mono); font-size: 11px; font-weight: 500; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
   .action-type-badge.read { background: var(--accent-subtle); color: var(--accent); }
   .action-type-badge.cmd { background: var(--warning-subtle); color: var(--warning); }
   .action-type-badge.script { background: var(--warning-subtle); color: var(--warning); }
   .action-type-badge.write { background: var(--danger-subtle); color: var(--danger); }
-  .action-target { font-family: var(--font-mono); font-size: 13px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .action-target { font-family: var(--font-mono); font-size: 13px; color: var(--text-secondary); white-space: pre-wrap; word-break: break-all; flex: 1; }
+  .action-copy-btn { background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-tertiary); cursor: pointer; padding: 3px 5px; line-height: 1; flex-shrink: 0; transition: all var(--transition); } .action-copy-btn:hover { color: var(--text-primary); border-color: var(--text-secondary); } .action-copy-btn svg { width: 14px; height: 14px; display: block; } .action-copy-btn.copied { color: var(--success); border-color: var(--success); }
   .action-body { padding: 12px 16px; }
   .action-content-preview { font-family: var(--font-mono); font-size: 12px; background: var(--code-bg); padding: 10px 12px; border-radius: var(--radius-sm); margin-bottom: 12px; max-height: 120px; overflow-y: auto; white-space: pre-wrap; color: var(--text-secondary); border: 1px solid var(--border-subtle); }
   .action-buttons { display: flex; gap: 8px; }
@@ -496,7 +497,7 @@
       if(e.role==='user')w.classList.add('message-user-wrap');
       const l=document.createElement('div');l.className='message-label'+(e.role==='assistant'?' assistant-label':'');l.textContent=e.role==='user'?'You':'DoctorClaw';
       const b=document.createElement('div');b.className='message-body '+e.role+'-body';
-      b.innerHTML=fmt((e.content||'').replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'').trim());
+      b.innerHTML=fmt((e.content||'').replace(ACT_RE_STRIP,'').replace(ACT_RE_STRIP_OLD,'').replace(ACT_RE_PARTIAL,'').trim());
       w.appendChild(l);w.appendChild(b);
       if(e.role==='user'&&!streaming){
         const eb=document.createElement('button');eb.className='message-edit-btn';eb.title='Edit message';
@@ -511,10 +512,12 @@
   }
 
   function restoreAct(act,after){
+    act.target=(act.target||'').replace(/\[\/ACTION\s*$/,'').trimEnd();
+    if(act.content)act.content=act.content.replace(/\[\/ACTION\s*$/,'').trimEnd();
     const card=document.createElement('div');card.className='action-card no-anim';
     const bc=actBadge(act.type);
     const tl=actLabel(act.type);
-    let h='<div class="action-header"><span class="action-type-badge '+bc+'">'+tl+'</span><span class="action-target" title="'+esc(act.target)+'">'+esc(act.target)+'</span></div><div class="action-body">';
+    let h='<div class="action-header"><span class="action-type-badge '+bc+'">'+tl+'</span><span class="action-target" title="'+esc(act.target)+'">'+esc(act.target)+'</span><button class="action-copy-btn" data-copy="'+esc(act.target)+'" title="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div><div class="action-body">';
     if(act.content)h+='<div class="action-content-preview">'+esc(act.content)+'</div>';
     if(act.status==='pending')h+='<div class="action-buttons"><button class="btn btn-approve" data-action="approve">✓ Approve</button><button class="btn btn-deny" data-action="deny">✕ Deny</button></div>';
     else if(act.status==='approved')h+='<div class="action-buttons"><button class="btn btn-approve" disabled>✓ Approved</button></div>';
@@ -533,7 +536,9 @@
         const res=await fetch('/api/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:act.type,target:act.target,content:act.content})});
         const data=await res.json();act.status='approved';act.result=data.result;act.resultSuccess=data.success;persist();
         const r=document.createElement('div');r.className='action-result '+(data.success?'success':'failure');r.textContent=data.result;rc.appendChild(r);ab.textContent='✓ Approved';
-        cur().conversation.push({role:'user',content:'[Result of '+act.type+' on "'+act.target+'"]: '+(data.success?'SUCCESS':'FAILED')+'\n'+data.result});persist();
+        let resultForConv=data.result;const MAX_RESULT=4000;
+        if(resultForConv.length>MAX_RESULT)resultForConv=resultForConv.slice(0,MAX_RESULT)+'\n…[truncated — '+data.result.length+' total characters]';
+        cur().conversation.push({role:'user',content:'[Result of '+act.type+' on "'+act.target+'"]: '+(data.success?'SUCCESS':'FAILED')+'\n'+resultForConv});persist();
         streaming=true;setSendBtnStreaming(true);try{await streamResp();}finally{streaming=false;setSendBtnStreaming(false);}
       }catch(err){const r=document.createElement('div');r.className='action-result failure';r.textContent='Error: '+err.message;rc.appendChild(r);ab.textContent='✓ Approve';ab.disabled=false;db.disabled=false;}
       scrollDown();
@@ -550,7 +555,12 @@
   function scrollDown(){requestAnimationFrame(()=>{chatArea.scrollTop=chatArea.scrollHeight;});}
   function actBadge(t){return t==='READ_FILE'?'read':t==='RUN_CMD'?'cmd':t==='RUN_SCRIPT'?'script':'write';}
   function actLabel(t){return t==='READ_FILE'?'Read File':t==='RUN_CMD'?'Run Command':t==='RUN_SCRIPT'?'Run Script':'Write File';}
-  const ACT_RE_STRIP=/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g;
+  const ACT_TYPES='READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE';
+  const ACT_RE_STRIP=new RegExp('\\[ACTION:('+ACT_TYPES+'):[\\s\\S]+?\\[/ACTION\\]','g');
+  const ACT_RE_STRIP_OLD=new RegExp('\\[ACTION:('+ACT_TYPES+'):[^\\]]*\\]','g');
+  const ACT_RE_PARTIAL=/\[ACTION[\s\S]*$/;
+
+  chatArea.addEventListener('click',e=>{const btn=e.target.closest('.action-copy-btn');if(!btn)return;const text=btn.getAttribute('data-copy');navigator.clipboard.writeText(text).then(()=>{btn.classList.add('copied');btn.title='Copied!';setTimeout(()=>{btn.classList.remove('copied');btn.title='Copy';},1500);});});
 
   input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,160)+'px';});
   input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();}});
@@ -581,35 +591,44 @@
     let full='',aborted=false,activeReader=null;ttsStreamPos=0;ttsAborted=false;
     abortController.signal.addEventListener('abort',()=>{aborted=true;if(activeReader)try{activeReader.cancel();}catch{} stopTTS();});
     try{
-      const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:s.conversation})});
+      const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:s.conversation}),signal:abortController.signal});
       if(aborted){if(dot.parentNode)dot.remove();w.remove();return;}
       if(!res.ok){let detail;try{const err=await res.json();detail=err.detail||err.error||'Unknown error';}catch{detail=res.statusText||'Request failed';}const errMsg='Error: '+detail;b.innerHTML=fmt(errMsg);s.conversation.push({role:'assistant',content:errMsg});s.rendered.push({role:'assistant',content:errMsg});persist();return;}
       activeReader=res.body.getReader();const dec=new TextDecoder();let buf='';
       while(true){const{done,value}=await activeReader.read();if(done||aborted)break;buf+=dec.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop()||'';
-        for(const line of lines){if(line.startsWith('data: ')){const p=line.slice(6).trim();if(p==='[DONE]')continue;try{const j=JSON.parse(p);if(j.message?.content){full+=j.message.content;b.innerHTML=fmt(full.replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'').trim());scrollDown();if(!aborted)streamTTSCheck(full,false);}}catch{}}}}
+        for(const line of lines){if(line.startsWith('data: ')){const p=line.slice(6).trim();if(p==='[DONE]')continue;try{const j=JSON.parse(p);if(j.message?.content){full+=j.message.content;b.innerHTML=fmt(full.replace(ACT_RE_STRIP,'').replace(ACT_RE_STRIP_OLD,'').replace(ACT_RE_PARTIAL,'').trim());if(!b.textContent.trim())b.appendChild(dot);scrollDown();if(!aborted)streamTTSCheck(full,false);}}catch{}}}}
     }catch(e){
       if(aborted){if(!full.trim()){if(dot.parentNode)dot.remove();w.remove();return;}}
-      else{full+='\n\n[Connection interrupted: '+e.message+'. Try sending your message again.]';b.innerHTML=fmt(full.replace(ACT_RE_STRIP,'').trim());scrollDown();}
+      else{full+='\n\n[Connection interrupted: '+e.message+'. Try sending your message again.]';b.innerHTML=fmt(full.replace(ACT_RE_STRIP,'').replace(ACT_RE_STRIP_OLD,'').replace(ACT_RE_PARTIAL,'').trim());scrollDown();}
     }
     if(dot.parentNode)dot.remove();
-    if(!full.trim())full='Hello! I\'m DoctorClaw, your system diagnostics assistant. How can I help you today?';
-    b.innerHTML=fmt(full.replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'').trim());
+    if(!full.trim()){if(s.conversation.length<=1)full='Hello! I\'m DoctorClaw, your system diagnostics assistant. How can I help you today?';else full='I wasn\'t able to generate a response — the conversation may be too long. Try starting a new tab or shortening your last message.';}
+    b.innerHTML=fmt(full.replace(ACT_RE_STRIP,'').replace(ACT_RE_STRIP_OLD,'').replace(ACT_RE_PARTIAL,'').trim());
     s.conversation.push({role:'assistant',content:full});
     const entry={role:'assistant',content:full,actions:[]};
     if(!aborted){
-      const RE=/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]+)\]/g;let m;
-      while((m=RE.exec(full))!==null){
+      const RE_NEW=new RegExp('\\[ACTION:('+ACT_TYPES+'):([\\s\\S]+?)\\[/ACTION\\]','g');
+      const RE_OLD=new RegExp('\\[ACTION:('+ACT_TYPES+'):([^\\]]+)\\]','g');
+      let m;
+      const CLEAN_TAG=/\[\/ACTION\s*$/;
+      function extractAct(m){
         const type=m[1];let target,content;
-        if(type==='WRITE_FILE'||type==='RUN_SCRIPT'){const ci=m[2].indexOf(':');if(ci>-1){target=m[2].slice(0,ci);content=m[2].slice(ci+1);}else{target=m[2];content=null;}}else{target=m[2];content=null;}
-        const act={type,target,content,status:'pending',result:null,resultSuccess:null};entry.actions.push(act);
+        const raw=m[2].replace(CLEAN_TAG,'').trimEnd();
+        if(type==='WRITE_FILE'||type==='RUN_SCRIPT'){const ci=raw.indexOf(':');if(ci>-1){target=raw.slice(0,ci);content=raw.slice(ci+1).replace(CLEAN_TAG,'').trimEnd();}else{target=raw;content=null;}}else{target=raw;content=null;}
+        return {type,target,content,status:'pending',result:null,resultSuccess:null};
+      }
+      function buildCard(act){
+        entry.actions.push(act);
         const card=document.createElement('div');card.className='action-card';
-        const bc=actBadge(type);
-        const tl=actLabel(type);
-        let ch='<div class="action-header"><span class="action-type-badge '+bc+'">'+tl+'</span><span class="action-target" title="'+esc(target)+'">'+esc(target)+'</span></div><div class="action-body">';
-        if(content)ch+='<div class="action-content-preview">'+esc(content)+'</div>';
+        const bc=actBadge(act.type);const tl=actLabel(act.type);
+        let ch='<div class="action-header"><span class="action-type-badge '+bc+'">'+tl+'</span><span class="action-target" title="'+esc(act.target)+'">'+esc(act.target)+'</span><button class="action-copy-btn" data-copy="'+esc(act.target)+'" title="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div><div class="action-body">';
+        if(act.content)ch+='<div class="action-content-preview">'+esc(act.content)+'</div>';
         ch+='<div class="action-buttons"><button class="btn btn-approve" data-action="approve">✓ Approve</button><button class="btn btn-deny" data-action="deny">✕ Deny</button></div><div class="action-result-container"></div></div>';
         card.innerHTML=ch;w.after(card);wireAct(card,act);
       }
+      while((m=RE_NEW.exec(full))!==null){const act=extractAct(m);buildCard(act);}
+      const fullLegacy=full.replace(ACT_RE_STRIP,'');
+      while((m=RE_OLD.exec(fullLegacy))!==null){const act=extractAct(m);buildCard(act);}
     }
     s.rendered.push(entry);persist();scrollDown();
     if(audioEnabled&&!aborted){const bar=createAudioBar(full);w.appendChild(bar);if(ttsPlaying){currentTTSBar=bar;bar.setPlaying(true);}}
