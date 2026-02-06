@@ -701,10 +701,13 @@ app.post('/api/chat', async (req, res) => {
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let clientClosed = false;
+
+    req.on('close', () => { clientClosed = true; reader.cancel().catch(() => {}); });
 
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done || clientClosed) break;
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
@@ -719,7 +722,7 @@ app.post('/api/chat', async (req, res) => {
         } catch { /* skip malformed */ }
       }
     }
-    res.end();
+    if (!clientClosed) res.end();
   } catch (err) {
     res.status(500).json({ error: 'Server error', detail: err.message });
   }
