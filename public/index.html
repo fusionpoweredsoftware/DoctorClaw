@@ -536,7 +536,9 @@
         const res=await fetch('/api/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:act.type,target:act.target,content:act.content})});
         const data=await res.json();act.status='approved';act.result=data.result;act.resultSuccess=data.success;persist();
         const r=document.createElement('div');r.className='action-result '+(data.success?'success':'failure');r.textContent=data.result;rc.appendChild(r);ab.textContent='✓ Approved';
-        cur().conversation.push({role:'user',content:'[Result of '+act.type+' on "'+act.target+'"]: '+(data.success?'SUCCESS':'FAILED')+'\n'+data.result});persist();
+        let resultForConv=data.result;const MAX_RESULT=4000;
+        if(resultForConv.length>MAX_RESULT)resultForConv=resultForConv.slice(0,MAX_RESULT)+'\n…[truncated — '+data.result.length+' total characters]';
+        cur().conversation.push({role:'user',content:'[Result of '+act.type+' on "'+act.target+'"]: '+(data.success?'SUCCESS':'FAILED')+'\n'+resultForConv});persist();
         streaming=true;setSendBtnStreaming(true);try{await streamResp();}finally{streaming=false;setSendBtnStreaming(false);}
       }catch(err){const r=document.createElement('div');r.className='action-result failure';r.textContent='Error: '+err.message;rc.appendChild(r);ab.textContent='✓ Approve';ab.disabled=false;db.disabled=false;}
       scrollDown();
@@ -600,7 +602,7 @@
       else{full+='\n\n[Connection interrupted: '+e.message+'. Try sending your message again.]';b.innerHTML=fmt(full.replace(ACT_RE_STRIP,'').replace(ACT_RE_STRIP_OLD,'').replace(ACT_RE_PARTIAL,'').trim());scrollDown();}
     }
     if(dot.parentNode)dot.remove();
-    if(!full.trim())full='Hello! I\'m DoctorClaw, your system diagnostics assistant. How can I help you today?';
+    if(!full.trim()){if(s.conversation.length<=1)full='Hello! I\'m DoctorClaw, your system diagnostics assistant. How can I help you today?';else full='I wasn\'t able to generate a response — the conversation may be too long. Try starting a new tab or shortening your last message.';}
     b.innerHTML=fmt(full.replace(ACT_RE_STRIP,'').replace(ACT_RE_STRIP_OLD,'').replace(ACT_RE_PARTIAL,'').trim());
     s.conversation.push({role:'assistant',content:full});
     const entry={role:'assistant',content:full,actions:[]};
