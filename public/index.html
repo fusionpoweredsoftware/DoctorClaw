@@ -664,44 +664,83 @@
   const STOP_MIC_ICON='<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
 
   let isRecording=false, mediaRecorder=null, mediaStream=null, audioChunks=[], sttBaseText='';
-  let speechRecognition=null;
+  let sttWebSocket=null, sttAudioContext=null, sttSourceNode=null, sttScriptNode=null, sttCommittedText='';
 
   function startLivePreview(){
-    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-    if(!SR) return;
+    sttCommittedText='';
     try{
-      speechRecognition=new SR();
-      speechRecognition.continuous=true;
-      speechRecognition.interimResults=true;
-      speechRecognition.lang='en-US';
-      let retries=0;
-      speechRecognition.onresult=function(ev){
-        if(!isRecording) return;
-        retries=0;
-        let t='';
-        for(let i=0;i<ev.results.length;i++) t+=ev.results[i][0].transcript;
-        input.value=sttBaseText+(sttBaseText?' ':'')+t;
-        input.style.height='auto';
-        input.style.height=Math.min(input.scrollHeight,160)+'px';
+      const protocol=location.protocol==='https:'?'wss:':'ws:';
+      sttWebSocket=new WebSocket(protocol+'//'+location.host+'/ws/stt');
+
+      sttWebSocket.onmessage=function(e){
+        try{
+          const msg=JSON.parse(e.data);
+          if(msg.type==='ready'){startAudioCapture();return;}
+          if(msg.error){console.warn('STT WebSocket error:',msg.error);return;}
+          if(!isRecording) return;
+          if(msg.message_type==='partial_transcript'&&msg.text!==undefined){
+            const base=sttBaseText+(sttBaseText?' ':'')+sttCommittedText+(sttCommittedText?' ':'');
+            input.value=base+msg.text;
+            input.style.height='auto';
+            input.style.height=Math.min(input.scrollHeight,160)+'px';
+          }else if(msg.message_type==='committed_transcript'&&msg.text){
+            sttCommittedText+=(sttCommittedText?' ':'')+msg.text;
+            input.value=sttBaseText+(sttBaseText?' ':'')+sttCommittedText;
+            input.style.height='auto';
+            input.style.height=Math.min(input.scrollHeight,160)+'px';
+          }
+        }catch{}
       };
-      speechRecognition.onerror=function(ev){
-        console.warn('Speech preview error:',ev.error);
-      };
-      speechRecognition.onend=function(){
-        if(!isRecording||!speechRecognition) return;
-        if(retries<10){
-          retries++;
-          setTimeout(()=>{
-            if(isRecording&&speechRecognition){try{speechRecognition.start();}catch{speechRecognition=null;}}
-          },300);
-        } else speechRecognition=null;
-      };
-      speechRecognition.start();
-    }catch(e){speechRecognition=null;}
+
+      sttWebSocket.onerror=function(){};
+      sttWebSocket.onclose=function(){sttWebSocket=null;};
+    }catch(e){sttWebSocket=null;}
+  }
+
+  function startAudioCapture(){
+    if(!mediaStream||!isRecording) return;
+    try{sttAudioContext=new(window.AudioContext||window.webkitAudioContext)({sampleRate:16000});}
+    catch(e){try{sttAudioContext=new(window.AudioContext||window.webkitAudioContext)();}catch{return;}}
+    sttSourceNode=sttAudioContext.createMediaStreamSource(mediaStream);
+    sttScriptNode=sttAudioContext.createScriptProcessor(4096,1,1);
+    const targetRate=16000;
+    const actualRate=sttAudioContext.sampleRate;
+    const ratio=actualRate/targetRate;
+
+    sttScriptNode.onaudioprocess=function(e){
+      if(!isRecording||!sttWebSocket||sttWebSocket.readyState!==WebSocket.OPEN) return;
+      let float32=e.inputBuffer.getChannelData(0);
+      // Downsample if AudioContext didn't honor 16kHz
+      if(ratio>1.01){
+        const newLen=Math.floor(float32.length/ratio);
+        const ds=new Float32Array(newLen);
+        for(let i=0;i<newLen;i++) ds[i]=float32[Math.floor(i*ratio)];
+        float32=ds;
+      }
+      // Convert Float32 → Int16 PCM
+      const int16=new Int16Array(float32.length);
+      for(let i=0;i<float32.length;i++){
+        const s=Math.max(-1,Math.min(1,float32[i]));
+        int16[i]=s<0?s*0x8000:s*0x7FFF;
+      }
+      // Base64 encode
+      const bytes=new Uint8Array(int16.buffer);
+      let binary='';
+      for(let i=0;i<bytes.length;i++) binary+=String.fromCharCode(bytes[i]);
+      const base64=btoa(binary);
+      sttWebSocket.send(JSON.stringify({message_type:'input_audio_chunk',audio_base_64:base64}));
+    };
+
+    sttSourceNode.connect(sttScriptNode);
+    sttScriptNode.connect(sttAudioContext.destination);
   }
 
   function stopLivePreview(){
-    if(speechRecognition){try{speechRecognition.abort();}catch{}speechRecognition=null;}
+    if(sttScriptNode){try{sttScriptNode.disconnect();}catch{}sttScriptNode=null;}
+    if(sttSourceNode){try{sttSourceNode.disconnect();}catch{}sttSourceNode=null;}
+    if(sttAudioContext&&sttAudioContext.state!=='closed'){try{sttAudioContext.close();}catch{}}
+    sttAudioContext=null;
+    if(sttWebSocket){try{sttWebSocket.close();}catch{}sttWebSocket=null;}
   }
 
   function updateAudioBtnVisibility(){
@@ -735,13 +774,24 @@
       mediaRecorder.onstop=async()=>{
         stopLivePreview();
         if(mediaStream){mediaStream.getTracks().forEach(t=>t.stop());mediaStream=null;}
+
+        // If realtime WebSocket gave us committed text, use it and skip batch STT
+        if(sttCommittedText.trim()){
+          input.value=sttBaseText+(sttBaseText?' ':'')+sttCommittedText;
+          input.style.height='auto';
+          input.style.height=Math.min(input.scrollHeight,160)+'px';
+          input.focus();
+          audioChunks=[];
+          return;
+        }
+
+        // Fallback: send full recording to batch STT
         if(!audioChunks.length) return;
 
         const mType=mediaRecorder.mimeType||'audio/webm';
         const audioBlob=new Blob(audioChunks,{type:mType});
         audioChunks=[];
 
-        // Convert to base64 and send for transcription
         const reader=new FileReader();
         reader.onloadend=async()=>{
           const base64=reader.result.split(',')[1];

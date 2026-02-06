@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createInterface } from 'readline';
+import WebSocket, { WebSocketServer } from 'ws';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = join(__dirname, 'doctorclaw.config.json');
@@ -845,6 +846,79 @@ server.on('error', (err) => {
     console.error(`\n  ❌ Server error: ${err.message}\n`);
   }
   process.exit(1);
+});
+
+// ── WebSocket: Realtime STT Proxy (ElevenLabs Scribe v2 Realtime) ────────────
+
+const wss = new WebSocketServer({ noServer: true });
+
+server.on('upgrade', (request, socket, head) => {
+  const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
+  if (pathname === '/ws/stt') {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request);
+    });
+  } else {
+    socket.destroy();
+  }
+});
+
+wss.on('connection', (clientWs) => {
+  let current = {};
+  try { current = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')); } catch {}
+  const apiKey = current.elevenlabs_api_key;
+
+  if (!apiKey) {
+    clientWs.send(JSON.stringify({ error: 'ElevenLabs API key not configured' }));
+    clientWs.close();
+    return;
+  }
+
+  const elevenWs = new WebSocket(
+    'wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=scribe_v2_realtime&language_code=en&sample_rate=16000',
+    { headers: { 'xi-api-key': apiKey } }
+  );
+
+  let elevenReady = false;
+
+  elevenWs.on('open', () => {
+    elevenReady = true;
+    if (clientWs.readyState === WebSocket.OPEN) {
+      clientWs.send(JSON.stringify({ type: 'ready' }));
+    }
+  });
+
+  elevenWs.on('message', (data) => {
+    if (clientWs.readyState === WebSocket.OPEN) {
+      clientWs.send(data.toString());
+    }
+  });
+
+  elevenWs.on('error', (err) => {
+    console.warn('ElevenLabs STT WebSocket error:', err.message);
+    if (clientWs.readyState === WebSocket.OPEN) {
+      clientWs.send(JSON.stringify({ error: 'ElevenLabs connection error' }));
+    }
+    try { clientWs.close(); } catch {}
+  });
+
+  elevenWs.on('close', () => {
+    if (clientWs.readyState === WebSocket.OPEN) clientWs.close();
+  });
+
+  clientWs.on('message', (data) => {
+    if (elevenReady && elevenWs.readyState === WebSocket.OPEN) {
+      elevenWs.send(data.toString());
+    }
+  });
+
+  clientWs.on('close', () => {
+    if (elevenWs.readyState === WebSocket.OPEN) elevenWs.close();
+  });
+
+  clientWs.on('error', () => {
+    if (elevenWs.readyState === WebSocket.OPEN) elevenWs.close();
+  });
 });
 
 } // end boot()

@@ -31,15 +31,16 @@ When audio conversing is enabled, a **microphone button** appears between the me
 **How it works:**
 
 1. Click the microphone button to start recording — the button turns red with a pulsing animation
-2. Speak naturally; recording continues until you click the stop button
-3. When you stop, the audio is sent to the ElevenLabs Scribe API for transcription
-4. The transcribed text appears in the input field and the message is sent automatically
+2. As you speak, **words appear in real time** in the input field via ElevenLabs Realtime STT (Scribe v2 Realtime, ~150ms latency)
+3. Review the transcription while speaking — you can see exactly what's being captured
+4. Click the stop button when done; the final committed transcript is placed in the input field
+5. Press Enter to send (auto-send is disabled so you can review first)
 
 **Technical details:**
 
-- Uses the browser's **MediaRecorder API** to capture audio locally
-- Audio is encoded as base64 and sent to the server's `/api/stt` endpoint
-- The server proxies the request to ElevenLabs Scribe v2 (`POST /v1/speech-to-text`)
+- **Realtime live preview:** Uses a WebSocket connection to ElevenLabs Scribe v2 Realtime (`wss://api.elevenlabs.io/v1/speech-to-text/realtime`). Audio is captured as raw PCM 16-bit 16kHz via `AudioContext` + `ScriptProcessorNode` and streamed to ElevenLabs through a server-side WebSocket proxy (`/ws/stt`). Partial and committed transcripts are displayed as they arrive (~150ms latency).
+- **Batch fallback:** If the realtime WebSocket fails to connect, the full recording is sent via the batch STT endpoint (`/api/stt` → ElevenLabs Scribe v2 `POST /v1/speech-to-text`)
+- Uses the browser's **MediaRecorder API** to capture audio locally (as backup for batch STT)
 - Supported audio formats: WebM, OGG, MP4 (browser-dependent)
 - Any existing text in the input field is preserved and the transcription is appended
 
@@ -87,5 +88,7 @@ These fields are stored in `doctorclaw.config.json` alongside the other settings
 **No audio playback** — Verify your ElevenLabs API key and Voice ID are correct. The browser console will show errors if the TTS API returns a non-200 response.
 
 **Audio cuts out between sentences** — This can happen on slow connections. The parallel fetching strategy minimizes gaps, but latency to the ElevenLabs API is the main factor.
+
+**Live transcription not showing words** — The realtime STT requires a valid ElevenLabs API key with Scribe access. Check the browser console for WebSocket errors. If the realtime connection fails, the system falls back to batch transcription after you stop recording.
 
 **Browser asks for microphone permission repeatedly** — Grant persistent microphone access for the DoctorClaw origin in your browser's site settings.
