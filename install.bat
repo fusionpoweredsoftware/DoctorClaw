@@ -135,6 +135,43 @@ if exist "node_modules\.package-lock.json" (
 where ollama >nul 2>&1
 if %errorlevel% equ 0 (
     echo   [OK] Ollama found
+
+    :: Check if Ollama is up to date
+    set "OLLAMA_OUTDATED="
+    for /f "usebackq tokens=*" %%r in (`powershell -Command "& { try { $out = ollama --version 2>$null; if ($out -match '(\d+\.\d+\.\d+)') { $iv = $matches[1] } else { exit }; $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/ollama/ollama/releases/latest' -Headers @{'User-Agent'='DoctorClaw'} -ErrorAction Stop; if ($rel.tag_name -match '(\d+\.\d+\.\d+)') { $lv = $matches[1] } else { exit }; if ([version]$iv -lt [version]$lv) { Write-Output \"OUTDATED:${iv}:${lv}\" } else { Write-Output \"CURRENT:${iv}\" } } catch { } }" 2^>nul`) do set "OLLAMA_CHECK=%%r"
+
+    if defined OLLAMA_CHECK (
+        echo !OLLAMA_CHECK! | findstr /b "CURRENT" >nul 2>&1
+        if !errorlevel! equ 0 (
+            for /f "tokens=2 delims=:" %%v in ("!OLLAMA_CHECK!") do echo   [OK] Ollama is up to date ^(v%%v^)
+        ) else (
+            for /f "tokens=2,3 delims=:" %%a in ("!OLLAMA_CHECK!") do (
+                echo.
+                echo   [!!] WARNING: Ollama is OUT OF DATE! Installed: v%%a -^> Latest: v%%b
+                echo   [!!] Running an outdated version can cause model download failures,
+                echo   [!!] compatibility issues, and unexpected errors.
+                echo   [!!] Updating is STRONGLY recommended before continuing.
+                echo.
+                set /p "UPDATE_OLLAMA=  Update Ollama now? (STRONGLY recommended) [Y/n] "
+                if /i "!UPDATE_OLLAMA!"=="" set "UPDATE_OLLAMA=Y"
+                if /i "!UPDATE_OLLAMA!"=="Y" (
+                    echo   Downloading latest Ollama installer...
+                    powershell -Command "& { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://ollama.com/download/OllamaSetup.exe' -OutFile '%TEMP%\OllamaSetup.exe' }" 2>nul
+                    if !errorlevel! equ 0 (
+                        echo   Running Ollama installer...
+                        "%TEMP%\OllamaSetup.exe"
+                        del "%TEMP%\OllamaSetup.exe" 2>nul
+                        echo   [OK] Ollama update launched.
+                    ) else (
+                        echo   [!] Failed to download. Update manually from: https://ollama.com
+                    )
+                ) else (
+                    echo   [!] Continuing with outdated Ollama. You may experience issues.
+                )
+                echo.
+            )
+        )
+    )
 ) else (
     echo.
     echo   [!] Ollama not installed. DoctorClaw needs Ollama to run.

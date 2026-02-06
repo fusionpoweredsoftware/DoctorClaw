@@ -149,6 +149,37 @@ install_deps() {
 check_ollama() {
   if command -v ollama &>/dev/null; then
     success "Ollama found at $(command -v ollama)"
+
+    # Check if Ollama is up to date
+    local installed_ver
+    installed_ver="$(ollama --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+    if [ -n "$installed_ver" ]; then
+      info "Ollama version: v${installed_ver}"
+      local latest_ver
+      latest_ver="$(curl -fsSL -H 'User-Agent: DoctorClaw' https://api.github.com/repos/ollama/ollama/releases/latest 2>/dev/null | grep '"tag_name"' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+      if [ -n "$latest_ver" ]; then
+        if [ "$(printf '%s\n' "$latest_ver" "$installed_ver" | sort -V | tail -1)" = "$latest_ver" ] && [ "$installed_ver" != "$latest_ver" ]; then
+          echo ""
+          warn "Ollama is OUT OF DATE! Installed: v${installed_ver} → Latest: v${latest_ver}"
+          warn "Running an outdated version can cause model download failures,"
+          warn "compatibility issues, and unexpected errors."
+          warn "Updating is STRONGLY recommended before continuing."
+          echo ""
+          read -rp "  Update Ollama now? (STRONGLY recommended) [Y/n] " update_answer
+          update_answer="${update_answer:-Y}"
+          if [[ "$update_answer" =~ ^[Yy] ]]; then
+            info "Updating Ollama..."
+            curl -fsSL https://ollama.com/install.sh | sh || warn "Failed to update Ollama"
+            success "Ollama updated"
+          else
+            warn "Continuing with outdated Ollama. You may experience issues."
+          fi
+          echo ""
+        else
+          success "Ollama is up to date (v${installed_ver})"
+        fi
+      fi
+    fi
   else
     warn "Ollama not installed. DoctorClaw needs Ollama to run."
     echo ""

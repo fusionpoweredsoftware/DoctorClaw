@@ -116,6 +116,95 @@ async function ensureOllamaRunning(ollamaUrl) {
   return false;
 }
 
+function getOllamaVersion() {
+  try {
+    const output = execSync('ollama --version', { encoding: 'utf-8', stdio: 'pipe', timeout: 5000 }).trim();
+    const match = output.match(/(\d+\.\d+\.\d+)/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+async function getLatestOllamaVersion() {
+  try {
+    const resp = await fetch('https://api.github.com/repos/ollama/ollama/releases/latest', {
+      headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'DoctorClaw' },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      const tag = data.tag_name || '';
+      const match = tag.match(/(\d+\.\d+\.\d+)/);
+      return match ? match[1] : null;
+    }
+  } catch {}
+  return null;
+}
+
+function compareVersions(a, b) {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] || 0;
+    const nb = pb[i] || 0;
+    if (na > nb) return 1;
+    if (na < nb) return -1;
+  }
+  return 0;
+}
+
+/**
+ * Check if Ollama is up-to-date. If outdated, strongly recommend updating.
+ * @param {object|null} rl - readline interface for interactive mode, or null for non-interactive
+ */
+async function checkOllamaUpdate(rl) {
+  const installed = getOllamaVersion();
+  if (!installed) {
+    console.log('  Could not determine installed Ollama version.');
+    return;
+  }
+  console.log(`  Ollama version: v${installed}`);
+
+  const latest = await getLatestOllamaVersion();
+  if (!latest) {
+    console.log('  Could not check for Ollama updates (network unreachable).');
+    return;
+  }
+
+  if (compareVersions(installed, latest) >= 0) {
+    console.log(`  ✓ Ollama is up to date (v${installed}).`);
+    return;
+  }
+
+  // Outdated — strong warning
+  console.log('');
+  console.log(`  ⚠⚠  WARNING: Ollama is OUT OF DATE! Installed: v${installed} → Latest: v${latest}`);
+  console.log('  ⚠⚠  Running an outdated version of Ollama can cause model download failures,');
+  console.log('  ⚠⚠  compatibility issues, and unexpected errors during operation.');
+  console.log('  ⚠⚠  Updating is STRONGLY recommended before continuing.');
+
+  if (rl) {
+    // Interactive — offer to update
+    console.log('');
+    const updateAnswer = await ask(rl, 'Update Ollama now? (STRONGLY recommended) (y/n)', 'y');
+    if (updateAnswer.toLowerCase().startsWith('y')) {
+      installOllamaCli();
+    } else {
+      console.log('  Continuing with outdated Ollama. You may experience issues.');
+    }
+  } else {
+    // Non-interactive (-y flag) — warn but don't force
+    console.log('');
+    if (process.platform === 'win32') {
+      console.log('  Update Ollama from: https://ollama.com/download');
+    } else {
+      console.log('  Update with: curl -fsSL https://ollama.com/install.sh | sh');
+    }
+  }
+  console.log('');
+}
+
 /**
  * Check if a directory looks like an OpenClaw installation.
  * A directory qualifies if it has "openclaw" in its path OR contains
@@ -299,6 +388,9 @@ async function runSetup() {
     if (!isOllamaInstalled()) {
       console.log('  Ollama not found. Installing automatically (-y flag)...');
       installOllamaCli();
+    } else {
+      // Already installed — check if up to date (warn only, no prompt with -y)
+      await checkOllamaUpdate(null);
     }
 
     if (configExists) {
@@ -380,6 +472,9 @@ async function runSetup() {
       console.log('  You can continue setup, but DoctorClaw will not work until Ollama is installed.');
     }
     console.log('');
+  } else {
+    // Already installed — check if up to date
+    await checkOllamaUpdate(rl);
   }
 
   // Port
