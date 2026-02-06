@@ -79,6 +79,7 @@
   .action-type-badge.script { background: var(--warning-subtle); color: var(--warning); }
   .action-type-badge.write { background: var(--danger-subtle); color: var(--danger); }
   .action-target { font-family: var(--font-mono); font-size: 13px; color: var(--text-secondary); white-space: pre-wrap; word-break: break-all; flex: 1; }
+  .action-copy-btn { background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-tertiary); cursor: pointer; padding: 3px 5px; line-height: 1; flex-shrink: 0; transition: all var(--transition); } .action-copy-btn:hover { color: var(--text-primary); border-color: var(--text-secondary); } .action-copy-btn svg { width: 14px; height: 14px; display: block; } .action-copy-btn.copied { color: var(--success); border-color: var(--success); }
   .action-body { padding: 12px 16px; }
   .action-content-preview { font-family: var(--font-mono); font-size: 12px; background: var(--code-bg); padding: 10px 12px; border-radius: var(--radius-sm); margin-bottom: 12px; max-height: 120px; overflow-y: auto; white-space: pre-wrap; color: var(--text-secondary); border: 1px solid var(--border-subtle); }
   .action-buttons { display: flex; gap: 8px; }
@@ -514,7 +515,7 @@
     const card=document.createElement('div');card.className='action-card no-anim';
     const bc=actBadge(act.type);
     const tl=actLabel(act.type);
-    let h='<div class="action-header"><span class="action-type-badge '+bc+'">'+tl+'</span><span class="action-target" title="'+esc(act.target)+'">'+esc(act.target)+'</span></div><div class="action-body">';
+    let h='<div class="action-header"><span class="action-type-badge '+bc+'">'+tl+'</span><span class="action-target" title="'+esc(act.target)+'">'+esc(act.target)+'</span><button class="action-copy-btn" data-copy="'+esc(act.target)+'" title="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div><div class="action-body">';
     if(act.content)h+='<div class="action-content-preview">'+esc(act.content)+'</div>';
     if(act.status==='pending')h+='<div class="action-buttons"><button class="btn btn-approve" data-action="approve">✓ Approve</button><button class="btn btn-deny" data-action="deny">✕ Deny</button></div>';
     else if(act.status==='approved')h+='<div class="action-buttons"><button class="btn btn-approve" disabled>✓ Approved</button></div>';
@@ -552,6 +553,8 @@
   function actLabel(t){return t==='READ_FILE'?'Read File':t==='RUN_CMD'?'Run Command':t==='RUN_SCRIPT'?'Run Script':'Write File';}
   const ACT_RE_STRIP=/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g;
   const ACT_RE_PARTIAL=/\[ACTION[^\]]*$/;
+
+  chatArea.addEventListener('click',e=>{const btn=e.target.closest('.action-copy-btn');if(!btn)return;const text=btn.getAttribute('data-copy');navigator.clipboard.writeText(text).then(()=>{btn.classList.add('copied');btn.title='Copied!';setTimeout(()=>{btn.classList.remove('copied');btn.title='Copy';},1500);});});
 
   input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,160)+'px';});
   input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();}});
@@ -606,7 +609,7 @@
         const card=document.createElement('div');card.className='action-card';
         const bc=actBadge(type);
         const tl=actLabel(type);
-        let ch='<div class="action-header"><span class="action-type-badge '+bc+'">'+tl+'</span><span class="action-target" title="'+esc(target)+'">'+esc(target)+'</span></div><div class="action-body">';
+        let ch='<div class="action-header"><span class="action-type-badge '+bc+'">'+tl+'</span><span class="action-target" title="'+esc(target)+'">'+esc(target)+'</span><button class="action-copy-btn" data-copy="'+esc(target)+'" title="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div><div class="action-body">';
         if(content)ch+='<div class="action-content-preview">'+esc(content)+'</div>';
         ch+='<div class="action-buttons"><button class="btn btn-approve" data-action="approve">✓ Approve</button><button class="btn btn-deny" data-action="deny">✕ Deny</button></div><div class="action-result-container"></div></div>';
         card.innerHTML=ch;w.after(card);wireAct(card,act);
