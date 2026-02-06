@@ -605,11 +605,10 @@
     if(!aborted){
       const RE_NEW=new RegExp('\\[ACTION:('+ACT_TYPES+'):([\\s\\S]+?)\\[/ACTION\\]','g');
       const RE_OLD=new RegExp('\\[ACTION:('+ACT_TYPES+'):([^\\]]+)\\]','g');
-      let m;const seen=new Set();
+      let m;
       function extractAct(m){
         const type=m[1];let target,content;
         if(type==='WRITE_FILE'||type==='RUN_SCRIPT'){const ci=m[2].indexOf(':');if(ci>-1){target=m[2].slice(0,ci);content=m[2].slice(ci+1);}else{target=m[2];content=null;}}else{target=m[2];content=null;}
-        const key=type+':'+target;if(seen.has(key))return null;seen.add(key);
         return {type,target,content,status:'pending',result:null,resultSuccess:null};
       }
       function buildCard(act){
@@ -621,8 +620,9 @@
         ch+='<div class="action-buttons"><button class="btn btn-approve" data-action="approve">✓ Approve</button><button class="btn btn-deny" data-action="deny">✕ Deny</button></div><div class="action-result-container"></div></div>';
         card.innerHTML=ch;w.after(card);wireAct(card,act);
       }
-      while((m=RE_NEW.exec(full))!==null){const act=extractAct(m);if(act)buildCard(act);}
-      while((m=RE_OLD.exec(full))!==null){const act=extractAct(m);if(act)buildCard(act);}
+      while((m=RE_NEW.exec(full))!==null){const act=extractAct(m);buildCard(act);}
+      const fullLegacy=full.replace(ACT_RE_STRIP,'');
+      while((m=RE_OLD.exec(fullLegacy))!==null){const act=extractAct(m);buildCard(act);}
     }
     s.rendered.push(entry);persist();scrollDown();
     if(audioEnabled&&!aborted){const bar=createAudioBar(full);w.appendChild(bar);if(ttsPlaying){currentTTSBar=bar;bar.setPlaying(true);}}
