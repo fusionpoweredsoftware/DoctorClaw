@@ -284,7 +284,7 @@ async function runSetup() {
   // ── Interactive prompts ──
   console.log('');
   console.log('  ─────────────────────────────────');
-  console.log('  🩺 DoctorClaw Setup');
+  console.log('  [+] DoctorClaw Setup');
   console.log('  ─────────────────────────────────');
   console.log('');
   console.log('  Press Enter to accept defaults shown in parentheses.');
@@ -832,7 +832,7 @@ app.post('/api/execute', (req, res) => {
 // ── Start ───────────────────────────────────────────────────────────────────
 
 const server = app.listen(PORT, () => {
-  console.log(`\n  🩺 DoctorClaw is running at http://localhost:${PORT}\n`);
+  console.log(`\n  [+] DoctorClaw is running at http://localhost:${PORT}\n`);
   console.log(`  Ollama endpoint: ${OLLAMA_URL}`);
   console.log(`  Model: ${MODEL}`);
   console.log(`  OS: ${OS_TYPE}`);

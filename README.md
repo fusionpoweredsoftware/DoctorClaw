@@ -1,4 +1,4 @@
-# 🩺 DoctorClaw
+# DoctorClaw
 
 A lightweight system troubleshooting agent powered by [Ollama](https://ollama.com). DoctorClaw diagnoses system issues interactively — reading config files, running diagnostic commands, executing scripts, and applying fixes — but **only with your explicit approval**.
 

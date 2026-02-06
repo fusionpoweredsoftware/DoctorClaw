@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 banner() {
   echo ""
-  echo -e "${CYAN}${BOLD}  🩺 DoctorClaw Installer${RESET}"
+  echo -e "${CYAN}${BOLD}  [+] DoctorClaw Installer${RESET}"
   echo -e "${DIM}  ─────────────────────────────────${RESET}"
   echo ""
 }
