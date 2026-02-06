@@ -559,7 +559,7 @@
   async function sendMsg(){
     const text=input.value.trim();if(!text||streaming)return;const s=cur();
     // If recording, stop it and clear STT state so onstop doesn't refill the input
-    if(isRecording){sttCommittedText='';stopRecording();}
+    if(isRecording){sttCommittedText='';audioChunks=[];stopRecording();}
     if(!s.conversation.length){s.label=text.length>30?text.slice(0,30)+'…':text;renderTabs();}
     s.conversation.push({role:'user',content:text});s.rendered.push({role:'user',content:text});persist();
     input.value='';input.style.height='auto';renderChat();
