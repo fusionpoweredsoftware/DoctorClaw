@@ -198,6 +198,14 @@
   .tts-stop { background: none; border: none; color: var(--text-tertiary); cursor: pointer; font-size: 11px; font-family: var(--font-body); text-decoration: underline; padding: 0; transition: color var(--transition); }
   .tts-stop:hover { color: var(--danger); }
 
+  /* ── Per-message Audio Controls ── */
+  .msg-audio-bar { display: none; align-items: center; gap: 2px; margin-top: 6px; padding: 2px 0; }
+  .msg-audio-bar.visible { display: flex; }
+  .msg-audio-btn { background: none; border: none; color: var(--text-tertiary); cursor: pointer; font-size: 11px; font-family: var(--font-body); display: flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 4px; transition: all var(--transition); }
+  .msg-audio-btn:hover { color: var(--accent); background: var(--accent-subtle); }
+  .msg-audio-btn svg { width: 13px; height: 13px; }
+  .msg-audio-btn.stop-btn:hover { color: var(--danger); background: var(--danger-subtle); }
+
   @media (max-width: 640px) {
     .header { padding: 12px 16px; } .tabs-bar { padding: 8px 16px 0; } .chat-area { padding: 16px; } .input-area { padding: 12px 16px 20px; }
     .brand-text span { display: none; } .tab { max-width: 130px; padding: 7px 10px; }
@@ -497,6 +505,7 @@
         w.appendChild(eb);
       }
       chatArea.appendChild(w);
+      if(e.role==='assistant'&&audioEnabled){w.appendChild(createAudioBar(e.content));}
       if(e.actions)e.actions.forEach(a=>restoreAct(a,w));
     });scrollDown();
   }
@@ -563,7 +572,7 @@
     const dot=document.createElement('span');dot.className='streaming-dot';b.appendChild(dot);
     w.appendChild(l);w.appendChild(b);chatArea.appendChild(w);scrollDown();
     let full='',aborted=false,activeReader=null;ttsStreamPos=0;
-    abortController.signal.addEventListener('abort',()=>{aborted=true;if(activeReader)try{activeReader.cancel();}catch{}});
+    abortController.signal.addEventListener('abort',()=>{aborted=true;if(activeReader)try{activeReader.cancel();}catch{} stopTTS();});
     try{
       const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:s.conversation})});
       if(aborted){if(dot.parentNode)dot.remove();w.remove();return;}
@@ -596,6 +605,7 @@
       }
     }
     s.rendered.push(entry);persist();scrollDown();
+    if(audioEnabled&&!aborted){const bar=createAudioBar(full);w.appendChild(bar);if(ttsPlaying){currentTTSBar=bar;bar.setPlaying(true);}}
     // Flush any remaining TTS text that didn't hit the 2-sentence threshold
     if(!aborted) streamTTSCheck(full,true);
   }
@@ -654,6 +664,32 @@
   const STOP_MIC_ICON='<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
 
   let isRecording=false, mediaRecorder=null, mediaStream=null, audioChunks=[], sttBaseText='';
+  let speechRecognition=null;
+
+  function startLivePreview(){
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR) return;
+    try{
+      speechRecognition=new SR();
+      speechRecognition.continuous=true;
+      speechRecognition.interimResults=true;
+      speechRecognition.lang='en-US';
+      speechRecognition.onresult=function(ev){
+        let t='';
+        for(let i=0;i<ev.results.length;i++) t+=ev.results[i][0].transcript;
+        input.value=sttBaseText+(sttBaseText?' ':'')+t;
+        input.style.height='auto';
+        input.style.height=Math.min(input.scrollHeight,160)+'px';
+      };
+      speechRecognition.onerror=function(){try{speechRecognition.abort();}catch{}speechRecognition=null;};
+      speechRecognition.onend=function(){if(isRecording&&speechRecognition){try{speechRecognition.start();}catch{speechRecognition=null;}}};
+      speechRecognition.start();
+    }catch(e){speechRecognition=null;}
+  }
+
+  function stopLivePreview(){
+    if(speechRecognition){try{speechRecognition.abort();}catch{}speechRecognition=null;}
+  }
 
   function updateAudioBtnVisibility(){
     if(audioEnabled) audioBtn.classList.add('visible');
@@ -730,6 +766,7 @@
       audioBtn.classList.add('recording');
       audioBtn.title='Stop listening';
       mediaRecorder.start();
+      startLivePreview();
     }).catch(err=>{
       console.warn('Microphone access denied:',err);
     });
@@ -737,6 +774,7 @@
 
   function stopRecording(){
     isRecording=false;
+    stopLivePreview();
     audioBtn.innerHTML=MIC_ICON;
     audioBtn.classList.remove('recording');
     audioBtn.title='Voice input';
@@ -754,11 +792,14 @@
 
   // ── Text-to-Speech via ElevenLabs ──
 
-  let ttsPromises=[], ttsPlaying=false, currentAudio=null, ttsAborted=false, ttsStreamPos=0;
+  let ttsPromises=[], ttsPlaying=false, currentAudio=null, ttsAborted=false, ttsStreamPos=0, currentTTSBar=null;
 
   function showTTSIndicator(on){
     if(on) ttsIndicator.classList.add('active');
-    else ttsIndicator.classList.remove('active');
+    else{
+      ttsIndicator.classList.remove('active');
+      if(currentTTSBar){currentTTSBar.setPlaying(false);currentTTSBar=null;}
+    }
   }
 
   async function playNextTTS(){
@@ -796,6 +837,30 @@
   }
 
   ttsStopBtn.addEventListener('click',stopTTS);
+
+  function createAudioBar(content){
+    const bar=document.createElement('div');
+    bar.className='msg-audio-bar'+(audioEnabled?' visible':'');
+    const replayBtn=document.createElement('button');
+    replayBtn.className='msg-audio-btn replay-btn';
+    replayBtn.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg> Replay';
+    const stopBarBtn=document.createElement('button');
+    stopBarBtn.className='msg-audio-btn stop-btn';
+    stopBarBtn.innerHTML='<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> Stop';
+    stopBarBtn.style.display='none';
+    bar.setPlaying=function(on){replayBtn.style.display=on?'none':'';stopBarBtn.style.display=on?'':'none';};
+    replayBtn.addEventListener('click',()=>{
+      stopTTS();
+      currentTTSBar=bar;bar.setPlaying(true);
+      const stripped=content.replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):([^\]]*)\]/g,'');
+      const chunks=parseResponseForTTS(stripped);
+      if(chunks.length) fireTTSChunks(chunks);
+      else{bar.setPlaying(false);currentTTSBar=null;}
+    });
+    stopBarBtn.addEventListener('click',()=>stopTTS());
+    bar.appendChild(replayBtn);bar.appendChild(stopBarBtn);
+    return bar;
+  }
 
   function fireTTSChunks(chunks){
     const promises=chunks.map(text=>
