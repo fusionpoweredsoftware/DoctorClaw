@@ -684,11 +684,17 @@
         input.style.height='auto';
         input.style.height=Math.min(input.scrollHeight,160)+'px';
       };
-      speechRecognition.onerror=function(){};
+      speechRecognition.onerror=function(ev){
+        console.warn('Speech preview error:',ev.error);
+      };
       speechRecognition.onend=function(){
         if(!isRecording||!speechRecognition) return;
-        if(retries<5){retries++;try{speechRecognition.start();}catch{speechRecognition=null;}}
-        else speechRecognition=null;
+        if(retries<10){
+          retries++;
+          setTimeout(()=>{
+            if(isRecording&&speechRecognition){try{speechRecognition.start();}catch{speechRecognition=null;}}
+          },300);
+        } else speechRecognition=null;
       };
       speechRecognition.start();
     }catch(e){speechRecognition=null;}
@@ -715,7 +721,6 @@
     audioBtn.innerHTML=STOP_MIC_ICON;
     audioBtn.classList.add('recording');
     audioBtn.title='Stop listening';
-    startLivePreview();
     navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
       if(!isRecording){stream.getTracks().forEach(t=>t.stop());return;}
       mediaStream=stream;
@@ -769,13 +774,12 @@
           input.placeholder=prevPlaceholder;
           input.disabled=false;
           input.focus();
-          // Auto-send after transcription completes
-          if(input.value.trim()) sendMsg();
         };
         reader.readAsDataURL(audioBlob);
       };
 
       mediaRecorder.start();
+      startLivePreview();
     }).catch(err=>{
       isRecording=false;
       stopLivePreview();
