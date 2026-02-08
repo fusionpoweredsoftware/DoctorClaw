@@ -546,16 +546,19 @@
       const originId=activeId;
       try{
         const res=await fetch('/api/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:act.type,target:act.target,content:act.content})});
-        const data=await res.json();act.status='approved';act.result=data.result;act.resultSuccess=data.success;persist();
-        const r=document.createElement('div');r.className='action-result '+(data.success?'success':'failure');r.textContent=data.result;rc.appendChild(r);ab.textContent='✓ Approved';
+        const data=await res.json();act.status='approved';act.result=data.result;act.resultSuccess=data.success;
         let resultForConv=data.result;const MAX_RESULT=4000;
         if(resultForConv.length>MAX_RESULT)resultForConv=resultForConv.slice(0,MAX_RESULT)+'\n…[truncated — '+data.result.length+' total characters]';
         const origSession=sessions.find(s=>s.id===originId);
         if(!origSession)return;
-        origSession.conversation.push({role:'user',content:'[Result of '+act.type+' on "'+act.target+'"]: '+(data.success?'SUCCESS':'FAILED')+'\n'+resultForConv});persist();
-        if(activeId!==originId){activeId=originId;persist();renderTabs();renderChat();}
+        origSession.conversation.push({role:'user',content:'[Result of '+act.type+' on "'+act.target+'"]: '+(data.success?'SUCCESS':'FAILED')+'\n'+resultForConv});
+        if(activeId!==originId)activeId=originId;
+        persist();renderTabs();renderChat();
         streaming=true;setSendBtnStreaming(true);try{await streamResp();}finally{streaming=false;setSendBtnStreaming(false);}
-      }catch(err){const r=document.createElement('div');r.className='action-result failure';r.textContent='Error: '+err.message;rc.appendChild(r);ab.textContent='✓ Approve';ab.disabled=false;db.disabled=false;}
+      }catch(err){
+        if(!document.contains(rc)){if(activeId!==originId)activeId=originId;persist();renderTabs();renderChat();}
+        else{const r=document.createElement('div');r.className='action-result failure';r.textContent='Error: '+err.message;rc.appendChild(r);ab.textContent='✓ Approve';ab.disabled=false;db.disabled=false;}
+      }
       scrollDown();
     });
     db.addEventListener('click',()=>{
