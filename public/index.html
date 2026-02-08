@@ -531,6 +531,7 @@
     let h='<div class="action-header"><span class="action-type-badge '+bc+'">'+tl+'</span><span class="action-target" title="'+esc(act.target)+'">'+esc(act.target)+'</span><button class="action-copy-btn" data-copy="'+esc(act.target)+'" title="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div><div class="action-body">';
     if(act.content)h+='<div class="action-content-preview">'+esc(act.content)+'</div>';
     if(act.status==='pending')h+='<div class="action-buttons"><button class="btn btn-approve" data-action="approve">✓ Approve</button><button class="btn btn-deny" data-action="deny">✕ Deny</button></div>';
+    else if(act.status==='running')h+='<div class="action-buttons"><button class="btn btn-approve" disabled>Running…</button></div>';
     else if(act.status==='approved')h+='<div class="action-buttons"><button class="btn btn-approve" disabled>✓ Approved</button></div>';
     else h+='<div class="action-buttons"><button class="btn btn-deny" disabled>✕ Denied</button></div>';
     h+='<div class="action-result-container">';
@@ -543,15 +544,34 @@
     const ab=card.querySelector('[data-action="approve"]'),db=card.querySelector('[data-action="deny"]'),rc=card.querySelector('.action-result-container');
     ab.addEventListener('click',async()=>{
       ab.disabled=true;db.disabled=true;ab.textContent='Running…';
+      const originId=activeId;
+      const actId=act.id;
+      act.status='running';persist();
+      function findLiveAct(){
+        const s=sessions.find(s=>s.id===originId);
+        if(!s)return null;
+        for(const e of s.rendered){if(e.actions){const f=e.actions.find(a=>a.id===actId);if(f)return f;}}
+        return null;
+      }
       try{
         const res=await fetch('/api/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:act.type,target:act.target,content:act.content})});
-        const data=await res.json();act.status='approved';act.result=data.result;act.resultSuccess=data.success;persist();
-        const r=document.createElement('div');r.className='action-result '+(data.success?'success':'failure');r.textContent=data.result;rc.appendChild(r);ab.textContent='✓ Approved';
+        const data=await res.json();
+        const la=findLiveAct()||act;
+        la.status='approved';la.result=data.result;la.resultSuccess=data.success;
         let resultForConv=data.result;const MAX_RESULT=4000;
         if(resultForConv.length>MAX_RESULT)resultForConv=resultForConv.slice(0,MAX_RESULT)+'\n…[truncated — '+data.result.length+' total characters]';
-        cur().conversation.push({role:'user',content:'[Result of '+act.type+' on "'+act.target+'"]: '+(data.success?'SUCCESS':'FAILED')+'\n'+resultForConv});persist();
+        const origSession=sessions.find(s=>s.id===originId);
+        if(!origSession)return;
+        origSession.conversation.push({role:'user',content:'[Result of '+act.type+' on "'+act.target+'"]: '+(data.success?'SUCCESS':'FAILED')+'\n'+resultForConv});
+        if(activeId!==originId)activeId=originId;
+        persist();renderTabs();renderChat();
         streaming=true;setSendBtnStreaming(true);try{await streamResp();}finally{streaming=false;setSendBtnStreaming(false);}
-      }catch(err){const r=document.createElement('div');r.className='action-result failure';r.textContent='Error: '+err.message;rc.appendChild(r);ab.textContent='✓ Approve';ab.disabled=false;db.disabled=false;}
+      }catch(err){
+        const la=findLiveAct()||act;
+        la.status='pending';la.result=null;
+        if(activeId!==originId)activeId=originId;
+        persist();renderTabs();renderChat();
+      }
       scrollDown();
     });
     db.addEventListener('click',()=>{
@@ -626,7 +646,7 @@
         const type=m[1];let target,content;
         const raw=m[2].replace(CLEAN_TAG,'').trimEnd();
         if(type==='WRITE_FILE'||type==='RUN_SCRIPT'){const ci=raw.indexOf(':');if(ci>-1){target=raw.slice(0,ci);content=raw.slice(ci+1).replace(CLEAN_TAG,'').trimEnd();}else{target=raw;content=null;}}else{target=raw;content=null;}
-        return {type,target,content,status:'pending',result:null,resultSuccess:null};
+        return {id:'act_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),type,target,content,status:'pending',result:null,resultSuccess:null};
       }
       function buildCard(act){
         entry.actions.push(act);
