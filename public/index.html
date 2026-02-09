@@ -542,17 +542,18 @@
 
   function wireAct(card,act){
     const ab=card.querySelector('[data-action="approve"]'),db=card.querySelector('[data-action="deny"]'),rc=card.querySelector('.action-result-container');
+    const originId=activeId;
+    const actId=act.id;
+    function findLiveAct(){
+      const s=sessions.find(s=>s.id===originId);
+      if(!s)return null;
+      for(const e of s.rendered){if(e.actions){const f=e.actions.find(a=>a.id===actId);if(f)return f;}}
+      return null;
+    }
     ab.addEventListener('click',async()=>{
+      if(streaming)return;
       ab.disabled=true;db.disabled=true;ab.textContent='Running…';
-      const originId=activeId;
-      const actId=act.id;
       act.status='running';persist();
-      function findLiveAct(){
-        const s=sessions.find(s=>s.id===originId);
-        if(!s)return null;
-        for(const e of s.rendered){if(e.actions){const f=e.actions.find(a=>a.id===actId);if(f)return f;}}
-        return null;
-      }
       try{
         const res=await fetch('/api/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:act.type,target:act.target,content:act.content})});
         const data=await res.json();
@@ -565,7 +566,7 @@
         origSession.conversation.push({role:'user',content:'[Result of '+act.type+' on "'+act.target+'"]: '+(data.success?'SUCCESS':'FAILED')+'\n'+resultForConv});
         if(activeId!==originId)activeId=originId;
         persist();renderTabs();renderChat();
-        streaming=true;setSendBtnStreaming(true);try{await streamResp();}finally{streaming=false;setSendBtnStreaming(false);}
+        if(!streaming){streaming=true;setSendBtnStreaming(true);try{await streamResp();}finally{streaming=false;setSendBtnStreaming(false);}}
       }catch(err){
         const la=findLiveAct()||act;
         la.status='pending';la.result=null;
@@ -575,9 +576,14 @@
       scrollDown();
     });
     db.addEventListener('click',()=>{
-      ab.disabled=true;db.disabled=true;db.textContent='✕ Denied';act.status='denied';act.result='Action denied by user.';persist();
+      if(streaming)return;
+      ab.disabled=true;db.disabled=true;db.textContent='✕ Denied';
+      const la=findLiveAct()||act;
+      la.status='denied';la.result='Action denied by user.';
       const r=document.createElement('div');r.className='action-result denied';r.textContent='Action denied by user.';rc.appendChild(r);
-      cur().conversation.push({role:'user',content:'[User DENIED the action: '+act.type+' on "'+act.target+'"]'});persist();scrollDown();
+      const origSession=sessions.find(s=>s.id===originId);
+      if(origSession)origSession.conversation.push({role:'user',content:'[User DENIED the action: '+act.type+' on "'+act.target+'"]'});
+      persist();scrollDown();
     });
   }
 
