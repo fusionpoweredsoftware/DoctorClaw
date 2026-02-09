@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node server.mjs",
     "setup": "node server.mjs -i",
-    "start:quick": "node server.mjs -y"
+    "start:quick": "node server.mjs -y",
+    "terminal": "node server.mjs -t",
+    "terminal:quick": "node server.mjs -y -t"
   },
   "keywords": [],
   "author": "",

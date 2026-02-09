@@ -14,6 +14,7 @@ const CONFIG_PATH = join(__dirname, 'doctorclaw.config.json');
 const args = process.argv.slice(2);
 const FLAG_YES = args.includes('-y') || args.includes('--yes');
 const FLAG_INTERACTIVE = args.includes('-i') || args.includes('--interactive');
+const FLAG_TERMINAL = args.includes('-t') || args.includes('--terminal');
 
 // ── Interactive Setup ────────────────────────────────────────────────────────
 
@@ -673,6 +674,18 @@ function backupFile(filepath) {
   const backupPath = join(BACKUP_DIR, backupName);
   copyFileSync(filepath, backupPath);
   return backupPath;
+}
+
+// ── Terminal Mode ────────────────────────────────────────────────────────────
+
+if (FLAG_TERMINAL) {
+  const { runTerminalMode } = await import('./terminal.mjs');
+  await runTerminalMode({
+    OLLAMA_URL, MODEL, CONFIG_PATH, OS_TYPE, HAS_OPENCLAW, OPENCLAW_DIR,
+    SAFE_READ_PATHS, SAFE_WRITE_PATHS, BACKUP_DIR,
+    buildSystemPrompt, isCommandBlocked, isPathReadable, isPathWritable, backupFile,
+  });
+  return; // exit boot — no web server needed
 }
 
 // ── Middleware ───────────────────────────────────────────────────────────────
