@@ -387,7 +387,6 @@ export async function runTerminalMode(ctx) {
     // Slash commands
     if (text === '/quit' || text === '/exit') {
       console.log(`\n  ${C.dim}Goodbye!${C.reset}\n`);
-      rl.close();
       process.exit(0);
     }
     if (text === '/new') {
