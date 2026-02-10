@@ -39,7 +39,55 @@ export async function runTerminalMode(ctx) {
     buildSystemPrompt, isCommandBlocked, isPathReadable, isPathWritable, backupFile,
   } = ctx;
 
-  let conversation = [];
+  // ── Session Persistence ──
+
+  const SESSIONS_FILE = join(dirname(CONFIG_PATH), '.doctorclaw-sessions.json');
+
+  function loadSessions() {
+    try {
+      if (existsSync(SESSIONS_FILE)) {
+        return JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8'));
+      }
+    } catch {}
+    return { sessions: [], activeId: null };
+  }
+
+  function saveSessions() {
+    const data = { sessions, activeId: activeSession.id };
+    writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  }
+
+  function createSession() {
+    const now = new Date();
+    return {
+      id: 's_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+      label: now.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
+      conversation: [],
+      createdAt: now.toISOString(),
+    };
+  }
+
+  // Load existing sessions or create first one
+  let { sessions, activeId } = loadSessions();
+  let activeSession;
+
+  if (sessions.length && activeId) {
+    activeSession = sessions.find(s => s.id === activeId) || sessions[sessions.length - 1];
+  } else if (sessions.length) {
+    activeSession = sessions[sessions.length - 1];
+  } else {
+    activeSession = createSession();
+    sessions.push(activeSession);
+  }
+  saveSessions();
+
+  // Convenience alias
+  let conversation = activeSession.conversation;
+
+  function persist() {
+    activeSession.conversation = conversation;
+    saveSessions();
+  }
 
   // ── Header ──
 
@@ -63,10 +111,25 @@ export async function runTerminalMode(ctx) {
 
   console.log(`  ${C.dim}Model: ${MODEL}  |  OS: ${OS_TYPE}${HAS_OPENCLAW ? '  |  OpenClaw: ' + OPENCLAW_DIR : ''}${C.reset}`);
   console.log(`  ${C.dim}${'─'.repeat(50)}${C.reset}`);
-  console.log('');
-  console.log(`  ${C.dim}Describe the issue you're experiencing.${C.reset}`);
-  console.log(`  ${C.dim}Actions require your explicit approval before execution.${C.reset}`);
-  console.log(`  ${C.dim}Commands: /new (new session) /clear (clear screen) /quit (exit)${C.reset}`);
+
+  // Show session info
+  if (conversation.length > 0) {
+    const userMsgs = conversation.filter(m => m.role === 'user' && !m.content.startsWith('[Result of ') && !m.content.startsWith('[User DENIED'));
+    console.log(`  ${C.green}Resumed session:${C.reset} ${C.bold}${activeSession.label}${C.reset} ${C.dim}(${userMsgs.length} message${userMsgs.length !== 1 ? 's' : ''})${C.reset}`);
+    // Show last few exchanges as context
+    const recent = conversation.filter(m => m.role === 'user' && !m.content.startsWith('[Result of ') && !m.content.startsWith('[User DENIED')).slice(-3);
+    if (recent.length) {
+      console.log(`  ${C.dim}Recent:${C.reset}`);
+      for (const msg of recent) {
+        const preview = msg.content.length > 60 ? msg.content.slice(0, 60) + '...' : msg.content;
+        console.log(`  ${C.dim}  > ${preview}${C.reset}`);
+      }
+    }
+  } else {
+    console.log(`  ${C.dim}Describe the issue you're experiencing.${C.reset}`);
+    console.log(`  ${C.dim}Actions require your explicit approval before execution.${C.reset}`);
+  }
+  console.log(`  ${C.dim}Commands: /help for all commands${C.reset}`);
   console.log('');
 
   // ── Action execution (mirrors server.mjs /api/execute) ──
@@ -386,12 +449,73 @@ export async function runTerminalMode(ctx) {
 
     // Slash commands
     if (text === '/quit' || text === '/exit') {
-      console.log(`\n  ${C.dim}Goodbye!${C.reset}\n`);
+      persist();
+      console.log(`\n  ${C.dim}Goodbye! Session saved.${C.reset}\n`);
       process.exit(0);
     }
     if (text === '/new') {
-      conversation = [];
-      console.log(`\n  ${C.green}New session started.${C.reset}\n`);
+      persist();
+      activeSession = createSession();
+      sessions.push(activeSession);
+      conversation = activeSession.conversation;
+      saveSessions();
+      console.log(`\n  ${C.green}New session started.${C.reset} ${C.dim}(${activeSession.label})${C.reset}\n`);
+      return;
+    }
+    if (text === '/sessions' || text === '/list') {
+      console.log('');
+      console.log(`  ${C.bold}Sessions:${C.reset}`);
+      sessions.forEach((s, i) => {
+        const isCurrent = s.id === activeSession.id;
+        const userMsgs = s.conversation.filter(m => m.role === 'user' && !m.content.startsWith('[Result of ') && !m.content.startsWith('[User DENIED'));
+        const msgCount = userMsgs.length;
+        const marker = isCurrent ? `${C.cyan}> ` : '  ';
+        const label = isCurrent ? `${C.bold}${s.label}${C.reset}` : s.label;
+        const lastMsg = userMsgs.length ? userMsgs[userMsgs.length - 1].content : '';
+        const preview = lastMsg.length > 45 ? lastMsg.slice(0, 45) + '...' : lastMsg;
+        console.log(`  ${marker}${C.yellow}${i + 1}${C.reset}  ${label}  ${C.dim}(${msgCount} msg${msgCount !== 1 ? 's' : ''})${preview ? '  ' + preview : ''}${C.reset}`);
+      });
+      console.log(`\n  ${C.dim}Use /switch <number> to switch sessions${C.reset}\n`);
+      return;
+    }
+    if (text.startsWith('/switch')) {
+      const num = parseInt(text.split(/\s+/)[1], 10);
+      if (!num || num < 1 || num > sessions.length) {
+        console.log(`\n  ${C.red}Invalid session number.${C.reset} Use ${C.cyan}/sessions${C.reset} to see the list.\n`);
+        return;
+      }
+      persist();
+      activeSession = sessions[num - 1];
+      conversation = activeSession.conversation;
+      saveSessions();
+      const userMsgs = conversation.filter(m => m.role === 'user' && !m.content.startsWith('[Result of ') && !m.content.startsWith('[User DENIED'));
+      console.log(`\n  ${C.green}Switched to session ${num}:${C.reset} ${C.bold}${activeSession.label}${C.reset} ${C.dim}(${userMsgs.length} message${userMsgs.length !== 1 ? 's' : ''})${C.reset}`);
+      // Show recent context
+      const recent = userMsgs.slice(-3);
+      if (recent.length) {
+        console.log(`  ${C.dim}Recent:${C.reset}`);
+        for (const msg of recent) {
+          const preview = msg.content.length > 60 ? msg.content.slice(0, 60) + '...' : msg.content;
+          console.log(`  ${C.dim}  > ${preview}${C.reset}`);
+        }
+      }
+      console.log('');
+      return;
+    }
+    if (text.startsWith('/delete')) {
+      const num = parseInt(text.split(/\s+/)[1], 10);
+      if (!num || num < 1 || num > sessions.length) {
+        console.log(`\n  ${C.red}Invalid session number.${C.reset} Use ${C.cyan}/sessions${C.reset} to see the list.\n`);
+        return;
+      }
+      const target = sessions[num - 1];
+      if (target.id === activeSession.id) {
+        console.log(`\n  ${C.red}Can't delete the active session.${C.reset} Switch to another first.\n`);
+        return;
+      }
+      sessions = sessions.filter(s => s.id !== target.id);
+      saveSessions();
+      console.log(`\n  ${C.dim}Deleted session ${num}: ${target.label}${C.reset}\n`);
       return;
     }
     if (text === '/clear') {
@@ -400,19 +524,44 @@ export async function runTerminalMode(ctx) {
       console.log(`  ${C.dim}${'─'.repeat(50)}${C.reset}\n`);
       return;
     }
+    if (text === '/history') {
+      if (!conversation.length) {
+        console.log(`\n  ${C.dim}No messages in this session yet.${C.reset}\n`);
+        return;
+      }
+      console.log('');
+      for (const msg of conversation) {
+        if (msg.content.startsWith('[Result of ') || msg.content.startsWith('[User DENIED')) continue;
+        const isUser = msg.role === 'user';
+        const label = isUser ? `${C.bold}You${C.reset}` : `${C.cyan}${C.bold}DoctorClaw${C.reset}`;
+        const content = msg.content.length > 120 ? msg.content.slice(0, 120) + '...' : msg.content;
+        const stripped = content.replace(/\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):[\s\S]*?\[\/ACTION\]/g, '').trim();
+        if (stripped) console.log(`  ${label}: ${C.dim}${stripped}${C.reset}`);
+      }
+      console.log('');
+      return;
+    }
     if (text === '/help') {
       console.log('');
       console.log(`  ${C.bold}Commands:${C.reset}`);
-      console.log(`    ${C.cyan}/new${C.reset}    Start a new session`);
-      console.log(`    ${C.cyan}/clear${C.reset}  Clear the screen`);
-      console.log(`    ${C.cyan}/quit${C.reset}   Exit DoctorClaw`);
-      console.log(`    ${C.cyan}/help${C.reset}   Show this help`);
+      console.log(`    ${C.cyan}/new${C.reset}       Start a new session`);
+      console.log(`    ${C.cyan}/sessions${C.reset}  List all sessions`);
+      console.log(`    ${C.cyan}/switch N${C.reset}  Switch to session N`);
+      console.log(`    ${C.cyan}/delete N${C.reset}  Delete session N`);
+      console.log(`    ${C.cyan}/history${C.reset}   Show current session history`);
+      console.log(`    ${C.cyan}/clear${C.reset}     Clear the screen`);
+      console.log(`    ${C.cyan}/quit${C.reset}      Exit (session is auto-saved)`);
       console.log('');
       return;
     }
 
     // Add user message
     conversation.push({ role: 'user', content: text });
+    // Auto-label session from first message
+    if (conversation.length === 1) {
+      activeSession.label = text.length > 30 ? text.slice(0, 30) + '...' : text;
+    }
+    persist();
 
     // Stream response and process any action chains
     await processResponse();
@@ -439,6 +588,7 @@ export async function runTerminalMode(ctx) {
     }
 
     conversation.push({ role: 'assistant', content: full });
+    persist();
 
     // Parse and handle actions — loop handles chained follow-ups
     const actions = extractActions(full);
@@ -481,6 +631,7 @@ export async function runTerminalMode(ctx) {
           role: 'user',
           content: `[Result of ${act.type} on "${act.target}"]: ${result.success ? 'SUCCESS' : 'FAILED'}\n${resultForConv}`,
         });
+        persist();
 
         // Stream follow-up (which may contain more actions — handled recursively)
         await processResponse();
@@ -490,6 +641,7 @@ export async function runTerminalMode(ctx) {
           role: 'user',
           content: `[User DENIED the action: ${act.type} on "${act.target}"]`,
         });
+        persist();
       }
     }
   }
@@ -507,7 +659,8 @@ export async function runTerminalMode(ctx) {
   });
 
   rl.on('close', () => {
-    console.log(`\n  ${C.dim}Goodbye!${C.reset}\n`);
+    persist();
+    console.log(`\n  ${C.dim}Goodbye! Session saved.${C.reset}\n`);
     process.exit(0);
   });
 
