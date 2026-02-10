@@ -564,12 +564,14 @@
         const origSession=sessions.find(s=>s.id===originId);
         if(!origSession)return;
         origSession.conversation.push({role:'user',content:'[Result of '+act.type+' on "'+act.target+'"]: '+(data.success?'SUCCESS':'FAILED')+'\n'+resultForConv});
+        if(streaming){persist();return;}
         if(activeId!==originId)activeId=originId;
         persist();renderTabs();renderChat();
-        if(!streaming){streaming=true;setSendBtnStreaming(true);try{await streamResp();}finally{streaming=false;setSendBtnStreaming(false);}}
+        streaming=true;setSendBtnStreaming(true);try{await streamResp();}finally{streaming=false;setSendBtnStreaming(false);}
       }catch(err){
         const la=findLiveAct()||act;
         la.status='pending';la.result=null;
+        if(streaming){persist();return;}
         if(activeId!==originId)activeId=originId;
         persist();renderTabs();renderChat();
       }

@@ -28,3 +28,13 @@
 3. Lifted `findLiveAct`, `originId`, and `actId` to the `wireAct` scope so both approve and deny handlers share them, fixing the deny handler's use of stale `cur()`.
 
 **Files changed:** `public/index.html` (`wireAct`)
+
+## In-flight fetch returning during active stream destroys streaming DOM
+
+**Problem:** When two actions are approved before either fetch returns, the second fetch's handler resumes mid-stream and calls `renderChat()`, destroying the first stream's DOM elements. The LLM response gets cut off (e.g. showing `[A` instead of a full action card).
+
+**Root cause:** The `if(streaming)return` guard only blocks new approve clicks. Handlers already past the guard (waiting on their fetch) are not blocked — when their fetch resolves, they call `renderChat()` which wipes `chatArea.innerHTML` while `streamResp()` is still appending to it.
+
+**Fix:** Added `if(streaming){persist();return;}` check after the fetch resolves. If another stream is active, we save the data (action status, result, conversation entry) to localStorage but skip `renderChat()` and `streamResp()`. The data will be visible on the next render. Same guard added to the error path.
+
+**Files changed:** `public/index.html` (`wireAct` approve handler)
