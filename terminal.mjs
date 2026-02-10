@@ -277,6 +277,7 @@ export async function runTerminalMode(ctx) {
       .replace(ACT_RE_STRIP, '')
       .replace(ACT_RE_STRIP_OLD, '')
       .replace(ACT_RE_PARTIAL, '')
+      .replace(/\[\/ACTION\]/g, '')
       .trim();
   }
 
@@ -389,7 +390,7 @@ export async function runTerminalMode(ctx) {
             const chunk = parsed.message.content;
             full += chunk;
 
-            // Stream display: suppress text inside [ACTION:...[/ACTION] tags
+            // Stream display: suppress [ACTION:...[/ACTION] tags and stray [/ACTION]
             for (const ch of chunk) {
               if (insideAction) {
                 // Look for end of action tag
@@ -402,18 +403,28 @@ export async function runTerminalMode(ctx) {
                   // Start accumulating potential tag
                   pendingBracket = '[';
                 } else if (pendingBracket.startsWith('[')) {
+                  // Check for opening action tag
                   if (pendingBracket.match(/^\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):/)) {
                     insideAction = true;
                     pendingBracket = '';
-                  } else if (pendingBracket.length > 30 || !('[ACTION:READ_FILE:'.startsWith(pendingBracket) ||
-                             '[ACTION:RUN_CMD:'.startsWith(pendingBracket) ||
-                             '[ACTION:RUN_SCRIPT:'.startsWith(pendingBracket) ||
-                             '[ACTION:WRITE_FILE:'.startsWith(pendingBracket))) {
-                    // Not an action tag, flush the pending text
+                  }
+                  // Check for closing tag [/ACTION] — suppress it
+                  else if (pendingBracket === '[/ACTION]') {
+                    pendingBracket = '';
+                  }
+                  // Still could be an action or closing tag — keep buffering
+                  else if ('[ACTION:READ_FILE:'.startsWith(pendingBracket) ||
+                           '[ACTION:RUN_CMD:'.startsWith(pendingBracket) ||
+                           '[ACTION:RUN_SCRIPT:'.startsWith(pendingBracket) ||
+                           '[ACTION:WRITE_FILE:'.startsWith(pendingBracket) ||
+                           '[/ACTION]'.startsWith(pendingBracket)) {
+                    // keep buffering
+                  }
+                  // Not a tag — flush pending text
+                  else {
                     process.stdout.write(pendingBracket);
                     pendingBracket = '';
                   }
-                  // else still could be an action tag, keep buffering
                 } else {
                   process.stdout.write(ch);
                   pendingBracket = '';
