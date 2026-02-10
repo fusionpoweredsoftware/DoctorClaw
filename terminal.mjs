@@ -325,21 +325,13 @@ export async function runTerminalMode(ctx) {
     return out;
   }
 
-  // ── Prompt helper ──
+  // ── Prompt helper & interruption ──
 
-  // Input queue: lines typed during streaming get queued, not lost
-  let inputQueue = [];
+  let interruptInput = null;   // stores the line that interrupted streaming
+  let activeReader = null;     // the current stream reader (so we can cancel it)
   let busy = false;
 
   function promptYN(rl, question) {
-    // If there's queued input from typing during streaming, consume it
-    if (inputQueue.length) {
-      const queued = inputQueue.shift();
-      const answer = queued.trim().toLowerCase().startsWith('y');
-      // Show what was auto-answered
-      process.stdout.write(question + queued + '\n');
-      return Promise.resolve(answer);
-    }
     return new Promise(resolve => {
       rl.resume();
       rl.question(question, answer => {
@@ -373,49 +365,71 @@ export async function runTerminalMode(ctx) {
     }
 
     const reader = resp.body.getReader();
+    activeReader = reader;
     const decoder = new TextDecoder();
     let buffer = '';
     let full = '';
     let printedLen = 0;
+    let interrupted = false;
 
     // Print assistant label
     process.stdout.write(`\n  ${C.cyan}${C.bold}DoctorClaw${C.reset}\n  `);
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const parsed = JSON.parse(line);
-          if (parsed.message?.content) {
-            full += parsed.message.content;
+    // Resume readline during streaming so user can type to interrupt
+    rl.resume();
 
-            // Strip all action tags from the full accumulated text,
-            // then print only the new characters since last print.
-            // This is robust regardless of how tags are chunked.
-            const stripped = stripActions(full);
-            if (stripped.length > printedLen) {
-              process.stdout.write(stripped.slice(printedLen));
-              printedLen = stripped.length;
+    try {
+      while (true) {
+        // Check if user interrupted
+        if (interruptInput !== null) {
+          interrupted = true;
+          try { reader.cancel(); } catch {}
+          break;
+        }
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const parsed = JSON.parse(line);
+            if (parsed.message?.content) {
+              full += parsed.message.content;
+
+              // Strip all action tags from the full accumulated text,
+              // then print only the new characters since last print.
+              const stripped = stripActions(full);
+              if (stripped.length > printedLen) {
+                process.stdout.write(stripped.slice(printedLen));
+                printedLen = stripped.length;
+              }
             }
-          }
-          if (parsed.done) break;
-        } catch { /* skip malformed */ }
+            if (parsed.done) break;
+          } catch { /* skip malformed */ }
+        }
       }
+    } catch (err) {
+      // Reader cancelled or network error during interrupt
+      if (!interrupted) throw err;
     }
 
-    // Final flush in case stripActions trims trailing whitespace differently
-    const finalStripped = stripActions(full);
-    if (finalStripped.length > printedLen) {
-      process.stdout.write(finalStripped.slice(printedLen));
-    }
-    process.stdout.write('\n');
+    activeReader = null;
+    rl.pause();
 
-    return full;
+    if (interrupted) {
+      process.stdout.write(`\n  ${C.dim}(interrupted)${C.reset}\n`);
+    } else {
+      // Final flush
+      const finalStripped = stripActions(full);
+      if (finalStripped.length > printedLen) {
+        process.stdout.write(finalStripped.slice(printedLen));
+      }
+      process.stdout.write('\n');
+    }
+
+    return { full, interrupted };
   }
 
   // ── Main loop ──
@@ -547,20 +561,41 @@ export async function runTerminalMode(ctx) {
     persist();
 
     // Stream response and process any action chains
-    await processResponse();
+    const wasInterrupted = await processResponse();
+
+    // If interrupted, the user's new input is in interruptInput — handle it next
+    if (wasInterrupted && interruptInput !== null) {
+      const nextInput = interruptInput;
+      interruptInput = null;
+      console.log('');
+      await handleUserInput(nextInput);
+      return;
+    }
 
     console.log('');
   }
 
   // Process a response: stream it, then handle any actions (which may trigger follow-ups)
+  // Returns true if the response was interrupted by user input.
   async function processResponse() {
-    let full;
+    let result;
     try {
-      full = await streamChat(conversation);
+      result = await streamChat(conversation);
     } catch (err) {
       console.log(`\n  ${C.red}Error: ${err.message}${C.reset}\n`);
       conversation.pop(); // remove the message that triggered this
-      return;
+      return false;
+    }
+
+    let { full, interrupted } = result;
+
+    // If interrupted, save partial response and bail out
+    if (interrupted) {
+      if (full.trim()) {
+        conversation.push({ role: 'assistant', content: full + '\n\n[response interrupted by user]' });
+        persist();
+      }
+      return true;
     }
 
     if (!full.trim()) {
@@ -617,7 +652,8 @@ export async function runTerminalMode(ctx) {
         persist();
 
         // Stream follow-up (which may contain more actions — handled recursively)
-        await processResponse();
+        const wasInterrupted = await processResponse();
+        if (wasInterrupted) return true;
       } else {
         console.log(`  ${C.dim}Action denied.${C.reset}`);
         conversation.push({
@@ -627,6 +663,7 @@ export async function runTerminalMode(ctx) {
         persist();
       }
     }
+    return false;
   }
 
   // ── Start the REPL ──
@@ -635,22 +672,17 @@ export async function runTerminalMode(ctx) {
 
   rl.on('line', async (line) => {
     if (busy) {
-      // Queue input typed during streaming/action processing
-      inputQueue.push(line);
+      // User typed during streaming — interrupt the current response
+      interruptInput = line;
+      if (activeReader) {
+        try { activeReader.cancel(); } catch {}
+      }
       return;
     }
     busy = true;
     rl.pause();
     await handleUserInput(line);
     busy = false;
-    // Process any queued input (typed during streaming)
-    while (inputQueue.length && !busy) {
-      const queued = inputQueue.shift();
-      busy = true;
-      rl.pause();
-      await handleUserInput(queued);
-      busy = false;
-    }
     rl.prompt();
     rl.resume();
   });
