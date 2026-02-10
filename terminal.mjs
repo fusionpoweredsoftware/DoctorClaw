@@ -327,18 +327,24 @@ export async function runTerminalMode(ctx) {
 
   // ── Prompt helper ──
 
-  function promptYN(rl, question) {
-    return new Promise(resolve => {
-      rl.question(question, answer => {
-        resolve(answer.trim().toLowerCase().startsWith('y'));
-      });
-    });
-  }
+  // Input queue: lines typed during streaming get queued, not lost
+  let inputQueue = [];
+  let busy = false;
 
-  function promptLine(rl, prompt) {
+  function promptYN(rl, question) {
+    // If there's queued input from typing during streaming, consume it
+    if (inputQueue.length) {
+      const queued = inputQueue.shift();
+      const answer = queued.trim().toLowerCase().startsWith('y');
+      // Show what was auto-answered
+      process.stdout.write(question + queued + '\n');
+      return Promise.resolve(answer);
+    }
     return new Promise(resolve => {
-      rl.question(prompt, answer => {
-        resolve(answer);
+      rl.resume();
+      rl.question(question, answer => {
+        rl.pause();
+        resolve(answer.trim().toLowerCase().startsWith('y'));
       });
     });
   }
@@ -370,8 +376,7 @@ export async function runTerminalMode(ctx) {
     const decoder = new TextDecoder();
     let buffer = '';
     let full = '';
-    let insideAction = false;
-    let pendingBracket = '';
+    let printedLen = 0;
 
     // Print assistant label
     process.stdout.write(`\n  ${C.cyan}${C.bold}DoctorClaw${C.reset}\n  `);
@@ -387,49 +392,15 @@ export async function runTerminalMode(ctx) {
         try {
           const parsed = JSON.parse(line);
           if (parsed.message?.content) {
-            const chunk = parsed.message.content;
-            full += chunk;
+            full += parsed.message.content;
 
-            // Stream display: suppress [ACTION:...[/ACTION] tags and stray [/ACTION]
-            for (const ch of chunk) {
-              if (insideAction) {
-                // Look for end of action tag
-                if (full.endsWith('[/ACTION]')) {
-                  insideAction = false;
-                }
-              } else {
-                pendingBracket += ch;
-                if (ch === '[') {
-                  // Start accumulating potential tag
-                  pendingBracket = '[';
-                } else if (pendingBracket.startsWith('[')) {
-                  // Check for opening action tag
-                  if (pendingBracket.match(/^\[ACTION:(READ_FILE|RUN_CMD|RUN_SCRIPT|WRITE_FILE):/)) {
-                    insideAction = true;
-                    pendingBracket = '';
-                  }
-                  // Check for closing tag [/ACTION] — suppress it
-                  else if (pendingBracket === '[/ACTION]') {
-                    pendingBracket = '';
-                  }
-                  // Still could be an action or closing tag — keep buffering
-                  else if ('[ACTION:READ_FILE:'.startsWith(pendingBracket) ||
-                           '[ACTION:RUN_CMD:'.startsWith(pendingBracket) ||
-                           '[ACTION:RUN_SCRIPT:'.startsWith(pendingBracket) ||
-                           '[ACTION:WRITE_FILE:'.startsWith(pendingBracket) ||
-                           '[/ACTION]'.startsWith(pendingBracket)) {
-                    // keep buffering
-                  }
-                  // Not a tag — flush pending text
-                  else {
-                    process.stdout.write(pendingBracket);
-                    pendingBracket = '';
-                  }
-                } else {
-                  process.stdout.write(ch);
-                  pendingBracket = '';
-                }
-              }
+            // Strip all action tags from the full accumulated text,
+            // then print only the new characters since last print.
+            // This is robust regardless of how tags are chunked.
+            const stripped = stripActions(full);
+            if (stripped.length > printedLen) {
+              process.stdout.write(stripped.slice(printedLen));
+              printedLen = stripped.length;
             }
           }
           if (parsed.done) break;
@@ -437,9 +408,10 @@ export async function runTerminalMode(ctx) {
       }
     }
 
-    // Flush any remaining pending text that wasn't an action tag
-    if (pendingBracket && !insideAction) {
-      process.stdout.write(pendingBracket);
+    // Final flush in case stripActions trims trailing whitespace differently
+    const finalStripped = stripActions(full);
+    if (finalStripped.length > printedLen) {
+      process.stdout.write(finalStripped.slice(printedLen));
     }
     process.stdout.write('\n');
 
@@ -662,9 +634,23 @@ export async function runTerminalMode(ctx) {
   rl.prompt();
 
   rl.on('line', async (line) => {
-    // Pause readline during processing so prompts don't interfere
+    if (busy) {
+      // Queue input typed during streaming/action processing
+      inputQueue.push(line);
+      return;
+    }
+    busy = true;
     rl.pause();
     await handleUserInput(line);
+    busy = false;
+    // Process any queued input (typed during streaming)
+    while (inputQueue.length && !busy) {
+      const queued = inputQueue.shift();
+      busy = true;
+      rl.pause();
+      await handleUserInput(queued);
+      busy = false;
+    }
     rl.prompt();
     rl.resume();
   });
