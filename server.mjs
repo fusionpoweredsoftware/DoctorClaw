@@ -939,26 +939,28 @@ app.post('/api/stt', async (req, res) => {
 // ── Chat (streaming) ────────────────────────────────────────────────────────
 
 function buildSystemPrompt() {
-  // Read current config for remote OpenClaw state (may be toggled at runtime)
+  // Read current config for live state (settings may change at runtime)
   let liveCfg = {};
   try { liveCfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')); } catch {}
+  const hasLocalOpenclaw = liveCfg.has_openclaw !== false && !!liveCfg.openclaw_dir;
+  const localOpenclawDir = liveCfg.openclaw_dir || '';
   const remoteEnabled = !!liveCfg.remote_openclaw_enabled && !!liveCfg.remote_openclaw_ssh_address;
   const remoteAddr = liveCfg.remote_openclaw_ssh_address || '';
 
   // Determine OpenClaw context
   let openclawContext;
-  if (HAS_OPENCLAW && remoteEnabled) {
-    openclawContext = `Your job is to help the user fix problems on their system — especially issues related to OpenClaw configuration and services. You have access to BOTH a local OpenClaw installation and a Remote OpenClaw via SSH (${remoteAddr}). If the user's question is ambiguous about which OpenClaw they mean, ask for clarification.`;
+  if (hasLocalOpenclaw && remoteEnabled) {
+    openclawContext = `Your job is to help the user fix problems on their system — especially issues related to OpenClaw configuration and services. You have access to BOTH a local OpenClaw installation at ${localOpenclawDir} AND a Remote OpenClaw accessible via SSH at ${remoteAddr}. If the user asks about "OpenClaw" without specifying which one, ask them to clarify whether they mean local or remote.`;
   } else if (remoteEnabled) {
-    openclawContext = `Your job is to help the user fix problems on their system — especially issues related to OpenClaw configuration and services on a remote server via SSH (${remoteAddr}). Since there is no local OpenClaw installed, assume the user is referring to the Remote OpenClaw unless they explicitly indicate otherwise.`;
-  } else if (HAS_OPENCLAW) {
+    openclawContext = `Your job is to help the user fix problems on their system — especially issues related to OpenClaw configuration and services. You DO have access to the user's Remote OpenClaw via SSH at ${remoteAddr}. There is no local OpenClaw installed, so when the user mentions OpenClaw, they are referring to the remote instance. You can read files, run commands, run scripts, and write files on the remote server using REMOTE_ prefixed actions.`;
+  } else if (hasLocalOpenclaw) {
     openclawContext = `Your job is to help the user fix problems on their system — especially issues related to OpenClaw configuration and services, but also general Linux system issues.`;
   } else {
     openclawContext = `Your job is to help the user fix problems on their system — general Linux system diagnostics and troubleshooting.`;
   }
 
-  const openclawEnv = HAS_OPENCLAW ? `\n- OpenClaw directory (local): ${OPENCLAW_DIR}` : '';
-  const remoteEnv = remoteEnabled ? `\n- Remote OpenClaw: SSH to ${remoteAddr} (enabled)` : '';
+  const openclawEnv = hasLocalOpenclaw ? `\n- OpenClaw directory (local): ${localOpenclawDir}` : '';
+  const remoteEnv = remoteEnabled ? `\n- Remote OpenClaw: Connected via SSH to ${remoteAddr} — use REMOTE_ actions to interact with it` : '';
 
   // Remote action instructions
   const remoteActions = remoteEnabled ? `
@@ -969,8 +971,9 @@ function buildSystemPrompt() {
    [ACTION:REMOTE_WRITE_FILE:/path/to/file:content here[/ACTION]` : '';
 
   const remoteRules = remoteEnabled ? `
-17. REMOTE actions (REMOTE_READ_FILE, REMOTE_RUN_CMD, REMOTE_RUN_SCRIPT, REMOTE_WRITE_FILE) execute on the remote SSH server (${remoteAddr}). Use these when troubleshooting the remote OpenClaw installation. Local actions (READ_FILE, RUN_CMD, etc.) execute on the local machine. Choose the appropriate action based on context.
-18. ${!HAS_OPENCLAW ? 'Since there is no local OpenClaw, default to using REMOTE_ actions when the user asks about OpenClaw issues. ' : ''}When the user mentions OpenClaw problems${!HAS_OPENCLAW ? '' : ' and you need to determine whether they mean local or remote'}, use REMOTE_ prefixed actions for the remote server.` : '';
+17. You have DIRECT ACCESS to the remote server at ${remoteAddr} via SSH. REMOTE actions (REMOTE_READ_FILE, REMOTE_RUN_CMD, REMOTE_RUN_SCRIPT, REMOTE_WRITE_FILE) execute on that remote server. Local actions (READ_FILE, RUN_CMD, etc.) execute on the local machine. Choose the appropriate action based on context.
+18. ${!hasLocalOpenclaw ? 'Since there is no local OpenClaw, ALWAYS use REMOTE_ actions when the user asks about OpenClaw issues. ' : ''}When the user mentions OpenClaw problems${!hasLocalOpenclaw ? '' : ' and you need to determine whether they mean local or remote'}, use REMOTE_ prefixed actions for the remote server.
+19. If the user asks whether you have access to their remote OpenClaw, confirm that yes, Remote OpenClaw is configured and connected via SSH to ${remoteAddr}.` : '';
 
   return `You are DoctorClaw, an expert system diagnostics and troubleshooting assistant. ${openclawContext}
 
