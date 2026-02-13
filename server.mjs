@@ -26,6 +26,9 @@ const DEFAULTS = {
   os: process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux',
   read_paths: ['/etc/', '/var/log/', '/var/lib/', '/tmp/', '/home/', '/opt/', '/usr/local/etc/', '/proc/cpuinfo', '/proc/meminfo', '/proc/loadavg', '/proc/version', '/proc/uptime', '/proc/net/'],
   write_paths: ['/tmp/'],
+  remote_openclaw_enabled: false,
+  remote_openclaw_ssh_address: '',
+  remote_openclaw_ssh_pubkey: '',
 };
 
 function ask(rl, question, fallback) {
@@ -604,6 +607,9 @@ const HAS_OPENCLAW = config.has_openclaw !== false && !!config.openclaw_dir;
 const OPENCLAW_DIR = config.openclaw_dir || '';
 const OS_TYPE = config.os || 'linux';
 const BACKUP_DIR = join(__dirname, '.doctorclaw-backups');
+const REMOTE_OPENCLAW_ENABLED = !!config.remote_openclaw_enabled;
+const REMOTE_OPENCLAW_SSH_ADDRESS = config.remote_openclaw_ssh_address || '';
+const REMOTE_OPENCLAW_SSH_PUBKEY = config.remote_openclaw_ssh_pubkey || '';
 
 // ── Safety ──────────────────────────────────────────────────────────────────
 
@@ -675,6 +681,77 @@ function backupFile(filepath) {
   return backupPath;
 }
 
+// ── Remote OpenClaw (SSH) ────────────────────────────────────────────────────
+
+/**
+ * Execute a command on the remote SSH server.
+ * Uses the system SSH client with strict host key checking disabled for
+ * initial convenience (the user explicitly opted in to this connection).
+ * Returns { success, result }.
+ */
+function sshExec(sshAddress, cmd, timeoutMs = 30000) {
+  return new Promise((resolve) => {
+    if (!sshAddress) {
+      return resolve({ success: false, result: 'Remote OpenClaw SSH address not configured.' });
+    }
+    const sshCmd = `ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -o BatchMode=yes ${sshAddress} ${JSON.stringify(cmd)}`;
+    exec(sshCmd, { timeout: timeoutMs, maxBuffer: 1024 * 1024, encoding: 'utf-8' }, (err, stdout, stderr) => {
+      if (err) {
+        const msg = stderr || stdout || err.message;
+        if (msg.includes('Permission denied') || msg.includes('publickey')) {
+          return resolve({ success: false, result: `SSH authentication failed. Make sure your public key is authorized on the remote server.\n\n${msg}` });
+        }
+        if (msg.includes('Connection refused') || msg.includes('Connection timed out') || msg.includes('No route to host')) {
+          return resolve({ success: false, result: `SSH connection failed. Check the server address and ensure the SSH service is running.\n\n${msg}` });
+        }
+        return resolve({ success: false, result: msg });
+      }
+      resolve({ success: true, result: stdout || '(no output)' });
+    });
+  });
+}
+
+/**
+ * Read a file on the remote SSH server.
+ */
+async function sshReadFile(sshAddress, filepath) {
+  return sshExec(sshAddress, `cat ${JSON.stringify(filepath)}`);
+}
+
+/**
+ * Write a file on the remote SSH server (with backup).
+ */
+async function sshWriteFile(sshAddress, filepath, content) {
+  // Backup existing file first (ignore errors if file doesn't exist)
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const backupPath = `${filepath}.${timestamp}.bak`;
+  await sshExec(sshAddress, `[ -f ${JSON.stringify(filepath)} ] && cp ${JSON.stringify(filepath)} ${JSON.stringify(backupPath)} || true`);
+  // Write the new content
+  const escaped = content.replace(/'/g, "'\\''");
+  const writeCmd = `cat > ${JSON.stringify(filepath)} << 'DOCTORCLAW_EOF'\n${content}\nDOCTORCLAW_EOF`;
+  return sshExec(sshAddress, writeCmd, 30000);
+}
+
+// SSH connection test endpoint
+app.post('/api/ssh-test', async (req, res) => {
+  const { ssh_address } = req.body;
+  if (!ssh_address || !ssh_address.trim()) {
+    return res.json({ success: false, message: 'No SSH address provided.' });
+  }
+  const result = await sshExec(ssh_address.trim(), 'echo "DoctorClaw SSH connection successful" && uname -a');
+  if (result.success) {
+    // Try to detect OpenClaw on the remote server
+    const ocDetect = await sshExec(ssh_address.trim(), 'ls -d /opt/openclaw /usr/local/openclaw /etc/openclaw 2>/dev/null || which openclaw-gateway 2>/dev/null || echo "(OpenClaw directory not auto-detected)"');
+    res.json({
+      success: true,
+      message: `Connected successfully!\n\n${result.result.trim()}`,
+      remote_openclaw_hint: ocDetect.success ? ocDetect.result.trim() : '',
+    });
+  } else {
+    res.json({ success: false, message: result.result });
+  }
+});
+
 // ── Middleware ───────────────────────────────────────────────────────────────
 
 app.use(express.json({ limit: '5mb' }));
@@ -713,6 +790,9 @@ app.get('/api/config', (_req, res) => {
     audio_enabled: !!current.audio_enabled,
     elevenlabs_api_key: current.elevenlabs_api_key || '',
     elevenlabs_voice_id: current.elevenlabs_voice_id || '',
+    remote_openclaw_enabled: !!current.remote_openclaw_enabled,
+    remote_openclaw_ssh_address: current.remote_openclaw_ssh_address || '',
+    remote_openclaw_ssh_pubkey: current.remote_openclaw_ssh_pubkey || '',
   });
 });
 
@@ -733,6 +813,9 @@ app.post('/api/config', (req, res) => {
     if (updates.audio_enabled !== undefined) current.audio_enabled = !!updates.audio_enabled;
     if (updates.elevenlabs_api_key !== undefined) current.elevenlabs_api_key = updates.elevenlabs_api_key;
     if (updates.elevenlabs_voice_id !== undefined) current.elevenlabs_voice_id = updates.elevenlabs_voice_id;
+    if (updates.remote_openclaw_enabled !== undefined) current.remote_openclaw_enabled = !!updates.remote_openclaw_enabled;
+    if (updates.remote_openclaw_ssh_address !== undefined) current.remote_openclaw_ssh_address = updates.remote_openclaw_ssh_address;
+    if (updates.remote_openclaw_ssh_pubkey !== undefined) current.remote_openclaw_ssh_pubkey = updates.remote_openclaw_ssh_pubkey;
 
     writeFileSync(CONFIG_PATH, JSON.stringify(current, null, 2) + '\n', 'utf-8');
 
@@ -860,18 +943,47 @@ app.post('/api/stt', async (req, res) => {
 // ── Chat (streaming) ────────────────────────────────────────────────────────
 
 function buildSystemPrompt() {
-  const openclawContext = HAS_OPENCLAW
-    ? `Your job is to help the user fix problems on their system — especially issues related to OpenClaw configuration and services, but also general Linux system issues.`
-    : `Your job is to help the user fix problems on their system — general Linux system diagnostics and troubleshooting.`;
-  const openclawEnv = HAS_OPENCLAW ? `\n- OpenClaw directory: ${OPENCLAW_DIR}` : '';
+  // Read current config for remote OpenClaw state (may be toggled at runtime)
+  let liveCfg = {};
+  try { liveCfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')); } catch {}
+  const remoteEnabled = !!liveCfg.remote_openclaw_enabled && !!liveCfg.remote_openclaw_ssh_address;
+  const remoteAddr = liveCfg.remote_openclaw_ssh_address || '';
+
+  // Determine OpenClaw context
+  let openclawContext;
+  if (HAS_OPENCLAW && remoteEnabled) {
+    openclawContext = `Your job is to help the user fix problems on their system — especially issues related to OpenClaw configuration and services. You have access to BOTH a local OpenClaw installation and a Remote OpenClaw via SSH (${remoteAddr}). If the user's question is ambiguous about which OpenClaw they mean, ask for clarification.`;
+  } else if (remoteEnabled) {
+    openclawContext = `Your job is to help the user fix problems on their system — especially issues related to OpenClaw configuration and services on a remote server via SSH (${remoteAddr}). Since there is no local OpenClaw installed, assume the user is referring to the Remote OpenClaw unless they explicitly indicate otherwise.`;
+  } else if (HAS_OPENCLAW) {
+    openclawContext = `Your job is to help the user fix problems on their system — especially issues related to OpenClaw configuration and services, but also general Linux system issues.`;
+  } else {
+    openclawContext = `Your job is to help the user fix problems on their system — general Linux system diagnostics and troubleshooting.`;
+  }
+
+  const openclawEnv = HAS_OPENCLAW ? `\n- OpenClaw directory (local): ${OPENCLAW_DIR}` : '';
+  const remoteEnv = remoteEnabled ? `\n- Remote OpenClaw: SSH to ${remoteAddr} (enabled)` : '';
+
+  // Remote action instructions
+  const remoteActions = remoteEnabled ? `
+   [ACTION:REMOTE_READ_FILE:/path/to/file[/ACTION]
+   [ACTION:REMOTE_RUN_CMD:command here[/ACTION]
+   [ACTION:REMOTE_RUN_SCRIPT:/path/to/script.sh[/ACTION]
+   [ACTION:REMOTE_RUN_SCRIPT:/path/to/script.sh:arg1 arg2[/ACTION]
+   [ACTION:REMOTE_WRITE_FILE:/path/to/file:content here[/ACTION]` : '';
+
+  const remoteRules = remoteEnabled ? `
+17. REMOTE actions (REMOTE_READ_FILE, REMOTE_RUN_CMD, REMOTE_RUN_SCRIPT, REMOTE_WRITE_FILE) execute on the remote SSH server (${remoteAddr}). Use these when troubleshooting the remote OpenClaw installation. Local actions (READ_FILE, RUN_CMD, etc.) execute on the local machine. Choose the appropriate action based on context.
+18. ${!HAS_OPENCLAW ? 'Since there is no local OpenClaw, default to using REMOTE_ actions when the user asks about OpenClaw issues. ' : ''}When the user mentions OpenClaw problems${!HAS_OPENCLAW ? '' : ' and you need to determine whether they mean local or remote'}, use REMOTE_ prefixed actions for the remote server.` : '';
+
   return `You are DoctorClaw, an expert system diagnostics and troubleshooting assistant. ${openclawContext}
 
 ENVIRONMENT:
-- Operating system: ${OS_TYPE}${openclawEnv}
+- Operating system: ${OS_TYPE}${openclawEnv}${remoteEnv}
 - Server working directory: ${process.cwd()}
 - Config file location: ${CONFIG_PATH}
-- Readable paths: ${SAFE_READ_PATHS.join(', ')}
-- Writable paths: ${SAFE_WRITE_PATHS.join(', ')}
+- Readable paths (local): ${SAFE_READ_PATHS.join(', ')}
+- Writable paths (local): ${SAFE_WRITE_PATHS.join(', ')}
 - The user can add more paths by editing doctorclaw.config.json (read_paths and write_paths arrays).
 - IMPORTANT: There is a Settings panel in the DoctorClaw UI — the user can click the gear icon (⚙) in the top-right header to open it. The Settings panel lets the user configure: Ollama URL, model, port, OpenClaw directory, and all readable/writable paths. All changes are saved to doctorclaw.config.json automatically. Path changes take effect immediately without a restart. If a user asks how to configure paths or settings, ALWAYS direct them to the Settings panel (gear icon) first — do NOT tell them to manually edit the JSON file.
 
@@ -882,7 +994,7 @@ RULES:
    [ACTION:RUN_CMD:command here[/ACTION]
    [ACTION:RUN_SCRIPT:/path/to/script.sh[/ACTION]
    [ACTION:RUN_SCRIPT:/path/to/script.sh:arg1 arg2[/ACTION]
-   [ACTION:WRITE_FILE:/path/to/file:content here[/ACTION]
+   [ACTION:WRITE_FILE:/path/to/file:content here[/ACTION]${remoteActions}
 3. ALWAYS use absolute paths (starting with / on linux/mac, or drive letter on windows). Never use relative paths.
 4. RUN_SCRIPT can execute .sh, .bash, .bat, .cmd, and .ps1 scripts from any readable directory. The correct shell is chosen automatically based on the file extension and configured OS. Use RUN_SCRIPT instead of RUN_CMD when executing existing scripts.
 5. Use commands and paths appropriate for the configured operating system (${OS_TYPE}). For example, use ls on linux/mac and dir on windows.
@@ -896,7 +1008,7 @@ RULES:
 13. If an action FAILS or is DENIED, explain to the user what went wrong in plain language, suggest an alternative approach, and continue troubleshooting. Do NOT stop or get stuck — always keep the conversation moving forward.
 14. If a path is denied due to access restrictions, tell the user which paths are currently writable, and let them know they can add more paths by clicking the gear icon (⚙) in the top-right corner to open Settings.
 15. Only write to paths listed in the writable paths above. If you need to write somewhere else, tell the user to add it to the config first.
-16. If the user sends a casual greeting (like "hi", "hello", "hey", etc.) or a non-technical message, respond warmly and briefly. Introduce yourself as DoctorClaw, a system diagnostics assistant, and ask how you can help. Do NOT ignore greetings or return an empty response.`;
+16. If the user sends a casual greeting (like "hi", "hello", "hey", etc.) or a non-technical message, respond warmly and briefly. Introduce yourself as DoctorClaw, a system diagnostics assistant, and ask how you can help. Do NOT ignore greetings or return an empty response.${remoteRules}`;
 }
 
 app.post('/api/chat', async (req, res) => {
@@ -959,7 +1071,7 @@ app.post('/api/chat', async (req, res) => {
 
 // ── Action execution ────────────────────────────────────────────────────────
 
-app.post('/api/execute', (req, res) => {
+app.post('/api/execute', async (req, res) => {
   let { type, target, content } = req.body;
 
   // Resolve relative paths to absolute (only for file-based actions)
@@ -1050,6 +1162,58 @@ app.post('/api/execute', (req, res) => {
         return res.json({ success: true, result: msg });
       }
 
+      // ── Remote OpenClaw actions (execute over SSH) ──
+      case 'REMOTE_READ_FILE': {
+        let remoteCfg = {};
+        try { remoteCfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')); } catch {}
+        const addr = remoteCfg.remote_openclaw_ssh_address;
+        if (!remoteCfg.remote_openclaw_enabled || !addr) {
+          return res.json({ success: false, result: 'Remote OpenClaw is not enabled. Configure it in Settings → Experimental.' });
+        }
+        const remoteResult = await sshReadFile(addr, target);
+        return res.json(remoteResult);
+      }
+
+      case 'REMOTE_RUN_CMD': {
+        if (isCommandBlocked(target)) {
+          return res.json({ success: false, result: `Blocked: "${target}" matches a dangerous command pattern. DoctorClaw refuses to run it.` });
+        }
+        let remoteCfg2 = {};
+        try { remoteCfg2 = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')); } catch {}
+        const addr2 = remoteCfg2.remote_openclaw_ssh_address;
+        if (!remoteCfg2.remote_openclaw_enabled || !addr2) {
+          return res.json({ success: false, result: 'Remote OpenClaw is not enabled. Configure it in Settings → Experimental.' });
+        }
+        const remoteResult2 = await sshExec(addr2, target);
+        return res.json(remoteResult2);
+      }
+
+      case 'REMOTE_WRITE_FILE': {
+        let remoteCfg3 = {};
+        try { remoteCfg3 = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')); } catch {}
+        const addr3 = remoteCfg3.remote_openclaw_ssh_address;
+        if (!remoteCfg3.remote_openclaw_enabled || !addr3) {
+          return res.json({ success: false, result: 'Remote OpenClaw is not enabled. Configure it in Settings → Experimental.' });
+        }
+        const remoteResult3 = await sshWriteFile(addr3, target, content);
+        return res.json(remoteResult3);
+      }
+
+      case 'REMOTE_RUN_SCRIPT': {
+        let remoteCfg4 = {};
+        try { remoteCfg4 = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')); } catch {}
+        const addr4 = remoteCfg4.remote_openclaw_ssh_address;
+        if (!remoteCfg4.remote_openclaw_enabled || !addr4) {
+          return res.json({ success: false, result: 'Remote OpenClaw is not enabled. Configure it in Settings → Experimental.' });
+        }
+        if (isCommandBlocked(target)) {
+          return res.json({ success: false, result: `Blocked: script execution matches a dangerous command pattern.` });
+        }
+        const scriptCmd = content ? `bash ${JSON.stringify(target)} ${content}` : `bash ${JSON.stringify(target)}`;
+        const remoteResult4 = await sshExec(addr4, scriptCmd, 60000);
+        return res.json(remoteResult4);
+      }
+
       default:
         return res.json({ success: false, result: `Unknown action type: ${type}` });
     }
@@ -1066,6 +1230,7 @@ const server = app.listen(PORT, () => {
   console.log(`  Model: ${MODEL}`);
   console.log(`  OS: ${OS_TYPE}`);
   console.log(`  OpenClaw: ${HAS_OPENCLAW ? OPENCLAW_DIR : '(not configured)'}`);
+  console.log(`  Remote OpenClaw: ${REMOTE_OPENCLAW_ENABLED ? REMOTE_OPENCLAW_SSH_ADDRESS : '(not configured)'}`);
   console.log(`  Config: ${CONFIG_PATH}`);
   console.log(`\n  Tip: Run with -i to reconfigure, or -y to skip setup.\n`);
 });
