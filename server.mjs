@@ -28,7 +28,6 @@ const DEFAULTS = {
   write_paths: ['/tmp/'],
   remote_openclaw_enabled: false,
   remote_openclaw_ssh_address: '',
-  remote_openclaw_ssh_pubkey: '',
 };
 
 function ask(rl, question, fallback) {
@@ -609,7 +608,6 @@ const OS_TYPE = config.os || 'linux';
 const BACKUP_DIR = join(__dirname, '.doctorclaw-backups');
 const REMOTE_OPENCLAW_ENABLED = !!config.remote_openclaw_enabled;
 const REMOTE_OPENCLAW_SSH_ADDRESS = config.remote_openclaw_ssh_address || '';
-const REMOTE_OPENCLAW_SSH_PUBKEY = config.remote_openclaw_ssh_pubkey || '';
 
 // ── Safety ──────────────────────────────────────────────────────────────────
 
@@ -792,7 +790,6 @@ app.get('/api/config', (_req, res) => {
     elevenlabs_voice_id: current.elevenlabs_voice_id || '',
     remote_openclaw_enabled: !!current.remote_openclaw_enabled,
     remote_openclaw_ssh_address: current.remote_openclaw_ssh_address || '',
-    remote_openclaw_ssh_pubkey: current.remote_openclaw_ssh_pubkey || '',
   });
 });
 
@@ -815,7 +812,6 @@ app.post('/api/config', (req, res) => {
     if (updates.elevenlabs_voice_id !== undefined) current.elevenlabs_voice_id = updates.elevenlabs_voice_id;
     if (updates.remote_openclaw_enabled !== undefined) current.remote_openclaw_enabled = !!updates.remote_openclaw_enabled;
     if (updates.remote_openclaw_ssh_address !== undefined) current.remote_openclaw_ssh_address = updates.remote_openclaw_ssh_address;
-    if (updates.remote_openclaw_ssh_pubkey !== undefined) current.remote_openclaw_ssh_pubkey = updates.remote_openclaw_ssh_pubkey;
 
     writeFileSync(CONFIG_PATH, JSON.stringify(current, null, 2) + '\n', 'utf-8');
 
