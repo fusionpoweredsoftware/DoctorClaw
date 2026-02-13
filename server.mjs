@@ -732,6 +732,10 @@ async function sshWriteFile(sshAddress, filepath, content) {
   return sshExec(sshAddress, writeCmd, 30000);
 }
 
+// ── Middleware ───────────────────────────────────────────────────────────────
+
+app.use(express.json({ limit: '5mb' }));
+
 // SSH connection test endpoint
 app.post('/api/ssh-test', async (req, res) => {
   const { ssh_address } = req.body;
@@ -751,10 +755,6 @@ app.post('/api/ssh-test', async (req, res) => {
     res.json({ success: false, message: result.result });
   }
 });
-
-// ── Middleware ───────────────────────────────────────────────────────────────
-
-app.use(express.json({ limit: '5mb' }));
 const staticPath = join(__dirname, 'public');
 console.log(`  Static files: ${staticPath}`);
 app.use(express.static(staticPath));

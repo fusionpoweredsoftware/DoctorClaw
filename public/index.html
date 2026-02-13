@@ -438,7 +438,7 @@
   // Settings
   const sOverlay=document.getElementById('settingsOverlay'),sBtn=document.getElementById('settingsBtn'),sClose=document.getElementById('settingsClose'),saveBtn=document.getElementById('saveSettings'),saveMsg=document.getElementById('saveMsg');
   sBtn.addEventListener('click',openSettings);sClose.addEventListener('click',()=>sOverlay.classList.remove('open'));
-  sOverlay.addEventListener('click',e=>{if(e.target===sOverlay)sOverlay.classList.remove('open');});
+  sOverlay.addEventListener('click',e=>{if(e.target===sOverlay&&!window.getSelection().toString())sOverlay.classList.remove('open');});
 
   // Settings tabs
   document.querySelectorAll('.settings-tab').forEach(tab=>{
