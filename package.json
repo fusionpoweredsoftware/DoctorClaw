@@ -7,7 +7,14 @@
   "scripts": {
     "start": "node server.mjs",
     "setup": "node server.mjs -i",
-    "start:quick": "node server.mjs -y"
+    "start:quick": "node server.mjs -y",
+    "version": "node version.mjs",
+    "version:patch": "node version.mjs patch",
+    "version:minor": "node version.mjs minor",
+    "version:major": "node version.mjs major",
+    "version:patch:tag": "node version.mjs patch --tag",
+    "version:minor:tag": "node version.mjs minor --tag",
+    "version:major:tag": "node version.mjs major --tag"
   },
   "keywords": [],
   "author": "",
